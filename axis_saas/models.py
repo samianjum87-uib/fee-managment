@@ -674,6 +674,15 @@ class Staff(models.Model):
         except Exception:
             pass
 
+    def has_passkeys(self):
+        from django_tenants.utils import schema_context
+        with schema_context('public'):
+            return WebAuthnCredential.objects.filter(
+                staff_credential__staff_id=self.pk,
+                staff_credential__schema_name=getattr(__import__('django.db').db.connection, 'schema_name', 'public'),
+                is_active=True,
+            ).exists()
+
     @property
     def is_online(self):
         from django.core.cache import cache
