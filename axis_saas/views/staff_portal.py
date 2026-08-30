@@ -329,7 +329,7 @@ def staff_toggle_2fa(request):
             credential.enable_two_factor(method)
             response = JsonResponse({'success': True, 'message': 'Two-factor authentication enabled.', 'method': method})
             if request.headers.get('x-requested-with') != 'XMLHttpRequest':
-                messages.success(request, '2-step verification enabled. Use an authenticator app to approve each sign-in.')
+                messages.success(request, '2-step verification enabled. Use Google Authenticator, Microsoft Authenticator, Authy, or another TOTP app to approve each sign-in.')
                 return redirect('staff_profile_page')
             return response
         if action == 'disable':
