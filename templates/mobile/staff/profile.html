@@ -50,7 +50,59 @@
         <button type="submit" class="btn-primary">Update</button>
     </form>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.1.1/dist/bundle/index.umd.min.js"></script>
+<script>
+    window.__simpleWebAuthnLibraryUrls = [
+        'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.1.1/dist/bundle/index.umd.min.js',
+        'https://unpkg.com/@simplewebauthn/browser@9.1.1/dist/bundle/index.umd.min.js'
+    ];
+
+    window.ensureSimpleWebAuthnLoaded = function(mode = 'registration') {
+        const hasRequiredApi = window.SimpleWebAuthnBrowser && (
+            (mode === 'registration' && window.SimpleWebAuthnBrowser.startRegistration) ||
+            (mode === 'authentication' && window.SimpleWebAuthnBrowser.startAuthentication)
+        );
+
+        if (hasRequiredApi) {
+            return Promise.resolve(true);
+        }
+
+        if (!window.__simpleWebAuthnLibraryPromise) {
+            window.__simpleWebAuthnLibraryPromise = new Promise((resolve, reject) => {
+                let lastError = null;
+                const tryNext = (index) => {
+                    if (index >= window.__simpleWebAuthnLibraryUrls.length) {
+                        reject(lastError || new Error('SimpleWebAuthn library could not be loaded.'));
+                        return;
+                    }
+
+                    const script = document.createElement('script');
+                    script.src = window.__simpleWebAuthnLibraryUrls[index];
+                    script.async = false;
+                    script.onload = function () {
+                        const ok = window.SimpleWebAuthnBrowser && (
+                            (mode === 'registration' && window.SimpleWebAuthnBrowser.startRegistration) ||
+                            (mode === 'authentication' && window.SimpleWebAuthnBrowser.startAuthentication)
+                        );
+                        if (ok) {
+                            resolve(true);
+                            return;
+                        }
+                        tryNext(index + 1);
+                    };
+                    script.onerror = function (error) {
+                        lastError = error;
+                        tryNext(index + 1);
+                    };
+                    document.head.appendChild(script);
+                };
+
+                tryNext(0);
+            });
+        }
+
+        return window.__simpleWebAuthnLibraryPromise;
+    };
+</script>
 <script>
     function getCookie(name) {
         const value = `; ${document.cookie}`;
@@ -85,9 +137,18 @@
         statusEl.style.color = isError ? '#b91c1c' : '#475569';
     }
 
-    function ensureWebAuthnSupport() {
-        if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.create || !window.SimpleWebAuthnBrowser || !window.SimpleWebAuthnBrowser.startRegistration) {
+    async function ensureWebAuthnSupport() {
+        try {
+            await window.ensureSimpleWebAuthnLoaded('registration');
+        } catch (error) {
+            throw new Error('The WebAuthn browser library could not be loaded. Please refresh the page or check your network connection.');
+        }
+
+        if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.create) {
             throw new Error('This browser does not support native WebAuthn passkeys. Use Chrome, Edge, Firefox, or Safari with a compatible device.');
+        }
+        if (!window.SimpleWebAuthnBrowser || !window.SimpleWebAuthnBrowser.startRegistration) {
+            throw new Error('The WebAuthn browser library is not loaded. Please refresh the page and try again.');
         }
         if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
             throw new Error('Passkeys require a secure context. Use HTTPS or localhost.');
@@ -99,7 +160,7 @@
         if (!button) return;
 
         try {
-            ensureWebAuthnSupport();
+            await ensureWebAuthnSupport();
         } catch (error) {
             displayPasskeyStatus(formatWebAuthnError(error), true);
             button.textContent = 'Register Passkey';

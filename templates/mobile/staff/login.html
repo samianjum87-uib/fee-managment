@@ -10,11 +10,6 @@
     {% if pending_passkey %}
         <div id="passkey-login-status" class="alert" style="color: #1d4ed8; background: rgba(59,130,246,.08);">Your password was accepted. Completing secure passkey verification…</div>
     {% endif %}
-    <div id="biometric-login-modal" style="display: none; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: rgba(15,23,42,.02);">
-        <div style="font-weight: 700; margin-bottom: 8px;">Verify with biometric</div>
-        <div class="subtle" style="margin-bottom: 12px;">Your device is ready to confirm your identity with a passkey.</div>
-        <button type="button" class="btn-primary" id="start-biometric-login" style="width: 100%;">Use biometric verification</button>
-    </div>
     <form method="post" style="display: grid; gap: 12px;">
         {% csrf_token %}
         <div>
@@ -31,8 +26,59 @@
         Secure access is enforced with device-bound passkeys using FIDO2/WebAuthn and requires the browser to support platform or security-key authenticators.
     </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.1.1/dist/bundle/index.umd.min.js"></script>
 <script>
+    window.__simpleWebAuthnLibraryUrls = [
+        'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.1.1/dist/bundle/index.umd.min.js',
+        'https://unpkg.com/@simplewebauthn/browser@9.1.1/dist/bundle/index.umd.min.js'
+    ];
+
+    window.ensureSimpleWebAuthnLoaded = function(mode = 'authentication') {
+        const hasRequiredApi = window.SimpleWebAuthnBrowser && (
+            (mode === 'registration' && window.SimpleWebAuthnBrowser.startRegistration) ||
+            (mode === 'authentication' && window.SimpleWebAuthnBrowser.startAuthentication)
+        );
+
+        if (hasRequiredApi) {
+            return Promise.resolve(true);
+        }
+
+        if (!window.__simpleWebAuthnLibraryPromise) {
+            window.__simpleWebAuthnLibraryPromise = new Promise((resolve, reject) => {
+                let lastError = null;
+                const tryNext = (index) => {
+                    if (index >= window.__simpleWebAuthnLibraryUrls.length) {
+                        reject(lastError || new Error('SimpleWebAuthn library could not be loaded.'));
+                        return;
+                    }
+
+                    const script = document.createElement('script');
+                    script.src = window.__simpleWebAuthnLibraryUrls[index];
+                    script.async = false;
+                    script.onload = function () {
+                        const ok = window.SimpleWebAuthnBrowser && (
+                            (mode === 'registration' && window.SimpleWebAuthnBrowser.startRegistration) ||
+                            (mode === 'authentication' && window.SimpleWebAuthnBrowser.startAuthentication)
+                        );
+                        if (ok) {
+                            resolve(true);
+                            return;
+                        }
+                        tryNext(index + 1);
+                    };
+                    script.onerror = function (error) {
+                        lastError = error;
+                        tryNext(index + 1);
+                    };
+                    document.head.appendChild(script);
+                };
+
+                tryNext(0);
+            });
+        }
+
+        return window.__simpleWebAuthnLibraryPromise;
+    };
+
     function getCookie(name) {
         const value = `; ${document.cookie}`;
         const parts = value.split(`; ${name}=`);
@@ -40,26 +86,31 @@
         return '';
     }
 
-    function formatWebAuthnError(error) {
-        const name = error && error.name ? error.name : 'Error';
-        const message = error && error.message ? error.message : 'Passkey verification could not be completed.';
-
-        if (name === 'NotAllowedError') {
-            return 'Biometric verification was cancelled or blocked by the browser.';
-        }
-        if (name === 'SecurityError') {
-            return 'Invalid origin or insecure context. Use HTTPS or localhost.';
-        }
-        if (name === 'InvalidStateError') {
-            return 'This passkey is already registered or the browser state is invalid.';
-        }
-        if (name === 'NotSupportedError') {
-            return 'This device does not support platform biometric passkeys.';
-        }
-        return message;
+    function base64UrlToUint8Array(value) {
+        const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+        const binary = atob(normalized + pad);
+        return Uint8Array.from(binary, (char) => char.charCodeAt(0));
     }
 
-    function ensureWebAuthnSupport() {
+    function uint8ArrayToBase64Url(value) {
+        let binary = '';
+        value.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+        });
+        return btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/g, '');
+    }
+
+    async function ensureWebAuthnSupport() {
+        try {
+            await window.ensureSimpleWebAuthnLoaded('authentication');
+        } catch (error) {
+            throw new Error('The WebAuthn browser library could not be loaded. Please refresh the page or check your network connection.');
+        }
+
         if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.get) {
             throw new Error('This browser does not support native WebAuthn passkeys. Use Chrome, Edge, Firefox, or Safari with a compatible device.');
         }
@@ -73,16 +124,13 @@
 
     async function completePendingPasskeyLogin() {
         const status = document.getElementById('passkey-login-status');
-        const modal = document.getElementById('biometric-login-modal');
-        if (modal) modal.style.display = 'block';
         if (!status) return;
 
         try {
-            ensureWebAuthnSupport();
+            await ensureWebAuthnSupport();
         } catch (error) {
-            status.textContent = formatWebAuthnError(error);
+            status.textContent = error.message;
             status.style.color = '#b91c1c';
-            if (modal) modal.style.display = 'block';
             return;
         }
 
@@ -104,7 +152,29 @@
             }
 
             const options = await optionsResponse.json();
-            const credential = await window.SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: options });
+            const publicKey = {
+                challenge: base64UrlToUint8Array(options.challenge),
+                timeout: options.timeout,
+                allowCredentials: (options.allowCredentials || []).map((item) => ({
+                    ...item,
+                    id: base64UrlToUint8Array(item.id)
+                })),
+                userVerification: options.userVerification || 'preferred'
+            };
+
+            const credential = await navigator.credentials.get({ publicKey });
+            const payload = {
+                id: credential.id,
+                rawId: uint8ArrayToBase64Url(new Uint8Array(credential.rawId)),
+                type: credential.type,
+                response: {
+                    authenticatorData: uint8ArrayToBase64Url(new Uint8Array(credential.response.authenticatorData)),
+                    clientDataJSON: uint8ArrayToBase64Url(new Uint8Array(credential.response.clientDataJSON)),
+                    signature: uint8ArrayToBase64Url(new Uint8Array(credential.response.signature)),
+                    userHandle: credential.response.userHandle ? uint8ArrayToBase64Url(new Uint8Array(credential.response.userHandle)) : null,
+                },
+                clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {}
+            };
 
             const verifyResponse = await fetch('{% url "staff_webauthn_authentication_verify" %}', {
                 method: 'POST',
@@ -113,7 +183,7 @@
                     'X-CSRFToken': csrfToken,
                     'X-Requested-With': 'XMLHttpRequest'
                 },
-                body: JSON.stringify(credential)
+                body: JSON.stringify(payload)
             });
 
             const verifyData = await verifyResponse.json();
@@ -128,14 +198,10 @@
 
             status.textContent = verifyData.message || 'Passkey verified successfully.';
         } catch (error) {
-            status.textContent = formatWebAuthnError(error);
+            status.textContent = error.message || 'Passkey verification could not be completed.';
             status.style.color = '#b91c1c';
         }
     }
-
-    document.getElementById('start-biometric-login')?.addEventListener('click', function () {
-        completePendingPasskeyLogin();
-    });
 
     {% if pending_passkey %}
     completePendingPasskeyLogin();
