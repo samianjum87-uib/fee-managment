@@ -245,10 +245,11 @@ class StaffAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
         generated = getattr(obj, '_generated_password', None)
-        if generated:
+        username = getattr(obj, '_generated_username', None)
+        if generated or username:
             self.message_user(
                 request,
-                f"Staff portal credentials generated: username={obj.email or obj.full_name.lower().replace(' ', '.')} and password={generated}",
+                f"Staff portal credentials generated: username={username or obj.email or obj.full_name.lower().replace(' ', '.')} and password={generated or 'stored securely'}",
                 level=20,
             )
 

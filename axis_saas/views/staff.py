@@ -20,7 +20,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from ..models import SchoolClient, Staff, SchoolClass, ClassSubject
+from ..models import SchoolClient, Staff, StaffCredential, SchoolClass, ClassSubject
 from ..models import SchoolClass
 from ..forms import StaffForm
 from .helpers import (
@@ -142,11 +142,14 @@ def get_staff_profile_context(request, schema_name, staff_id):
     tenant = get_tenant(request, schema_name)
     with schema_context(schema_name):
         staff = get_object_or_404(Staff, id=staff_id)
-        # Get classes and sections for dropdown (if needed)
         classes = SchoolClass.objects.filter(is_active=True).order_by('name', 'section')
         sections = classes.values_list('section', flat=True).distinct().order_by('section')
         class_id = request.GET.get('class_id')
         section = request.GET.get('section')
+    with schema_context('public'):
+        credential = StaffCredential.objects.filter(staff_id=staff.id, schema_name=schema_name).first()
+    if credential is not None:
+        credential.raw_password = getattr(staff, '_generated_password', None) or getattr(credential, 'raw_password', None)
     return {
         'tenant': tenant,
         'classes': classes,
@@ -154,6 +157,7 @@ def get_staff_profile_context(request, schema_name, staff_id):
         'selected_class_id': class_id,
         'selected_section': section,
         'staff': staff,
+        'credential': credential,
         'logo_url': tenant.school_logo.url if tenant.school_logo else None,
     }
 def staff_add(request, schema_name):
@@ -163,7 +167,12 @@ def staff_add(request, schema_name):
             form = StaffForm(request.POST, request.FILES)
             if form.is_valid():
                 staff = form.save()
-                messages.success(request, f"Staff {staff.full_name} added successfully. ID: {staff.staff_id}")
+                credential = staff.ensure_staff_credential(force_new=True)
+                password = getattr(credential, 'raw_password', None)
+                if password:
+                    messages.success(request, f"Staff {staff.full_name} added successfully. Username: {credential.username} | Password: {password}")
+                else:
+                    messages.success(request, f"Staff {staff.full_name} added successfully. ID: {staff.staff_id}")
                 return redirect('staff_list', schema_name=schema_name)
         else:
             form = StaffForm()

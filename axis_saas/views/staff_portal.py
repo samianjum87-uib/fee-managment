@@ -193,7 +193,11 @@ def staff_profile(request):
     from django_tenants.utils import schema_context
     with schema_context(schema_name):
         staff = Staff.objects.get(pk=request.session['staff_id'])
-    return render(request, 'mobile/staff/profile.html', {'staff': staff})
+    with schema_context('public'):
+        credential = StaffCredential.objects.filter(staff_id=staff.pk, schema_name=schema_name).first()
+    if credential is not None:
+        credential.raw_password = getattr(staff, '_generated_password', None) or getattr(credential, 'raw_password', None)
+    return render(request, 'mobile/staff/profile.html', {'staff': staff, 'credential': credential})
 
 
 @require_staff_login

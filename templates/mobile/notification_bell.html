@@ -140,6 +140,7 @@
         color: var(--muted);
     }
 </style>
+{% if tenant.schema_name %}
 <script>
     
         // Fix link for mobile: if on mobile and link points to /vouchers/ without /mobile/, rewrite it
@@ -287,3 +288,4 @@
         setInterval(fetchNotifications, 30000);
     })();
 </script>
+{% endif %}

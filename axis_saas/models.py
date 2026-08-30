@@ -609,7 +609,22 @@ class Staff(models.Model):
                 credential.is_active = True
                 credential.save()
                 credential.raw_password = raw_password
+                self._generated_password = raw_password
+                self._generated_username = username
             else:
+                credential.raw_password = getattr(self, '_generated_password', None)
+                if credential.raw_password is None:
+                    credential.raw_password = None
+            return credential
+
+    def get_public_credential(self, schema_name=None):
+        from django_tenants.utils import schema_context
+        tenant_schema = schema_name or getattr(__import__('django.db').db.connection, 'schema_name', None) or 'public'
+        with schema_context('public'):
+            credential = StaffCredential.objects.filter(staff_id=self.pk, schema_name=tenant_schema).first()
+            if credential is not None and getattr(self, '_generated_password', None):
+                credential.raw_password = self._generated_password
+            elif credential is not None and not hasattr(credential, 'raw_password'):
                 credential.raw_password = None
             return credential
 

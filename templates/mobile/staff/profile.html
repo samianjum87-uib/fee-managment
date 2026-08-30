@@ -10,6 +10,13 @@
     <p><strong>Phone:</strong> {{ staff.phone|default:'N/A' }}</p>
     <p><strong>Department:</strong> {{ staff.get_department_display }}</p>
 </div>
+{% if credential %}
+<div class="card">
+    <h3>Portal Access</h3>
+    <p><strong>Username:</strong> {{ credential.username }}</p>
+    <p><strong>Password:</strong> {{ credential.raw_password|default:'********' }}</p>
+</div>
+{% endif %}
 <div class="card">
     <h3>Change Password</h3>
     <form method="post" action="{% url 'staff_change_password' %}" style="display:grid; gap:10px;">
