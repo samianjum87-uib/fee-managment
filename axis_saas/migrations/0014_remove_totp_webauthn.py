@@ -26,20 +26,18 @@ class Migration(migrations.Migration):
                 'ordering': ['-created_at'],
             },
         ),
-        migrations.RemoveField(
-            model_name='staffcredential',
-            name='two_factor_enabled',
-        ),
-        migrations.RemoveField(
-            model_name='staffcredential',
-            name='two_factor_last_verified',
-        ),
-        migrations.RemoveField(
-            model_name='staffcredential',
-            name='two_factor_method',
-        ),
-        migrations.RemoveField(
-            model_name='staffcredential',
-            name='two_factor_secret',
+        migrations.RunSQL(
+            sql=[
+                'ALTER TABLE "axis_saas_staffcredential" DROP COLUMN IF EXISTS "two_factor_enabled";',
+                'ALTER TABLE "axis_saas_staffcredential" DROP COLUMN IF EXISTS "two_factor_last_verified";',
+                'ALTER TABLE "axis_saas_staffcredential" DROP COLUMN IF EXISTS "two_factor_method";',
+                'ALTER TABLE "axis_saas_staffcredential" DROP COLUMN IF EXISTS "two_factor_secret";',
+            ],
+            reverse_sql=[
+                'ALTER TABLE "axis_saas_staffcredential" ADD COLUMN IF NOT EXISTS "two_factor_enabled" boolean DEFAULT false;',
+                'ALTER TABLE "axis_saas_staffcredential" ADD COLUMN IF NOT EXISTS "two_factor_last_verified" timestamp with time zone NULL;',
+                'ALTER TABLE "axis_saas_staffcredential" ADD COLUMN IF NOT EXISTS "two_factor_method" varchar(20) DEFAULT "none";',
+                'ALTER TABLE "axis_saas_staffcredential" ADD COLUMN IF NOT EXISTS "two_factor_secret" varchar(64) NULL;',
+            ],
         ),
     ]
