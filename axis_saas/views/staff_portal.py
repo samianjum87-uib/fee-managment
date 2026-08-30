@@ -312,7 +312,7 @@ def staff_webauthn_registration_options(request):
             timeout=60000,
             authenticator_selection=AuthenticatorSelectionCriteria(
                 user_verification=UserVerificationRequirement.PREFERRED,
-                resident_key=ResidentKeyRequirement.REQUIRED,
+                resident_key=ResidentKeyRequirement.PREFERRED,
             ),
         )
         return JsonResponse(json.loads(options_to_json(registration_options)))
