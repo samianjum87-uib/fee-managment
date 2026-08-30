@@ -8,16 +8,21 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name="staffcredential",
-            name="two_factor_enabled",
-        ),
-        migrations.RemoveField(
-            model_name="staffcredential",
-            name="two_factor_last_verified",
-        ),
-        migrations.RemoveField(
-            model_name="staffcredential",
-            name="two_factor_method",
+        migrations.SeparateDatabaseAndState(
+            database_operations=[],
+            state_operations=[
+                migrations.RemoveField(
+                    model_name="staffcredential",
+                    name="two_factor_enabled",
+                ),
+                migrations.RemoveField(
+                    model_name="staffcredential",
+                    name="two_factor_last_verified",
+                ),
+                migrations.RemoveField(
+                    model_name="staffcredential",
+                    name="two_factor_method",
+                ),
+            ],
         ),
     ]
