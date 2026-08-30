@@ -50,6 +50,8 @@ def staff_login(request):
                 credential.save(update_fields=['last_login', 'failed_attempts', 'locked_until'])
 
                 request.session.flush()
+                request.session['school_admin_authenticated'] = False
+                request.session['school_admin_schema'] = ''
                 request.session['staff_id'] = staff.pk
                 request.session['staff_schema_name'] = credential.schema_name
                 request.session['staff_username'] = credential.username
@@ -69,6 +71,8 @@ def staff_login(request):
 
 def staff_logout(request):
     request.session.flush()
+    request.session.pop('school_admin_authenticated', None)
+    request.session.pop('school_admin_schema', None)
     return redirect('staff_login')
 
 

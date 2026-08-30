@@ -1,41 +1,21 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Staff Login</title>
-    <style>
-        body { margin:0; font-family: Arial, sans-serif; background: linear-gradient(135deg, #e2e8f0, #dbeafe); color:#0f172a; }
-        .wrapper { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
-        .card { width:100%; max-width:420px; background: rgba(255,255,255,.96); border-radius: 18px; padding: 24px; box-shadow: 0 20px 45px rgba(15,23,42,.15); }
-        h1 { margin: 0 0 10px; font-size: 28px; text-align:center; }
-        .sub { text-align:center; color:#475569; margin-bottom: 18px; }
-        .error { background: rgba(220,38,38,.08); color:#991b1b; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; }
-        form { display: grid; gap: 12px; }
-        label { font-weight: 600; }
-        input { width:100%; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius:10px; }
-        button { background:#2563eb; color:white; border:none; border-radius:10px; padding:12px; font-weight:700; cursor:pointer; }
-    </style>
-</head>
-<body>
-    <div class="wrapper">
-        <div class="card">
-            <h1>AXIS Staff</h1>
-            <div class="sub">Login with your staff credentials</div>
-            {% if error %}<div class="error">{{ error }}</div>{% endif %}
-            <form method="post">
-                {% csrf_token %}
-                <div>
-                    <label for="username">Username</label>
-                    <input id="username" name="username" type="text" autocomplete="username" required>
-                </div>
-                <div>
-                    <label for="password">Password</label>
-                    <input id="password" name="password" type="password" autocomplete="current-password" required>
-                </div>
-                <button type="submit">Login</button>
-            </form>
+{% extends 'staff/base.html' %}
+{% block title %}Staff Login{% endblock %}
+{% block content %}
+<div class="card" style="max-width:420px; margin:52px auto 0;">
+    <h1 style="margin: 0 0 10px; text-align:center;">AXIS Staff</h1>
+    <div class="muted" style="text-align:center; margin-bottom:18px;">Login with your staff credentials</div>
+    {% if error %}<div class="alert" style="background: rgba(220,38,38,.08); color:#991b1b; border-left-color:#dc2626;">{{ error }}</div>{% endif %}
+    <form method="post" style="display:grid; gap:12px;">
+        {% csrf_token %}
+        <div>
+            <label for="username">Username</label>
+            <input id="username" name="username" type="text" autocomplete="username" required>
         </div>
-    </div>
-</body>
-</html>
+        <div>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Login</button>
+    </form>
+</div>
+{% endblock %}

@@ -93,11 +93,16 @@ def school_login(request, schema_name):
         username = request.POST.get('username')
         password = request.POST.get('password')
         if username == tenant.admin_username and tenant.check_password(password):
+            request.session.flush()
             request.session['school_admin_authenticated'] = True
             request.session['school_admin_schema'] = tenant.schema_name
             request.session['school_admin_username'] = username
-            request.session.save()   # Force session save immediately
-            # Redirect to appropriate dashboard based on tenant_type
+            request.session.pop('staff_id', None)
+            request.session.pop('staff_schema_name', None)
+            request.session.pop('staff_username', None)
+            request.session.pop('staff_role', None)
+            request.session.pop('staff_name', None)
+            request.session.save()
             if tenant.tenant_type == 'gym':
                 return redirect('gym_dashboard', schema_name=tenant.schema_name)
             else:
@@ -107,6 +112,11 @@ def school_login(request, schema_name):
 
 def school_logout(request, schema_name):
     request.session.flush()
+    request.session.pop('staff_id', None)
+    request.session.pop('staff_schema_name', None)
+    request.session.pop('staff_username', None)
+    request.session.pop('staff_role', None)
+    request.session.pop('staff_name', None)
     return redirect('school_login', schema_name=schema_name)
 
 def login_required_for_schema(view_func):

@@ -1,10 +1,11 @@
-{% extends 'mobile/base.html' %}
+{% extends 'mobile/staff/base.html' %}
+{% block title %}Staff Login{% endblock %}
 {% block body %}
 <div class="card" style="max-width: 420px; margin: 42px auto 0;">
-    <h2 style="margin-bottom: 8px;">AXIS Staff Portal</h2>
-    <p class="text-secondary" style="margin-bottom: 18px;">Sign in with your school staff credentials.</p>
+    <h2 style="margin: 0 0 8px;">AXIS Staff Portal</h2>
+    <p class="subtle" style="margin-bottom: 18px;">Sign in with your school staff credentials.</p>
     {% if error %}
-        <div class="message error">{{ error }}</div>
+        <div class="alert" style="color: #991b1b; background: rgba(220,38,38,.08);">{{ error }}</div>
     {% endif %}
     <form method="post" style="display: grid; gap: 12px;">
         {% csrf_token %}
