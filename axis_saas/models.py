@@ -45,30 +45,22 @@ class SchoolClient(TenantMixin):
         self.admin_password = make_password(raw_password)
 
     def check_password(self, raw_password):
-        """Verify raw password against stored hash."""
-        return check_password(raw_password, self.admin_password)
+        """Verify raw password against stored hash or legacy plaintext."""
+        if self.admin_password and self.is_password_hashed():
+            return check_password(raw_password, self.admin_password)
+        return raw_password == self.admin_password
 
     def is_password_hashed(self):
         """Return True if admin_password looks like a Django hash."""
-        return self.admin_password.startswith(('pbkdf2_sha256', 'bcrypt', 'argon2'))
+        return bool(self.admin_password) and self.admin_password.startswith(('pbkdf2_sha256', 'bcrypt', 'argon2'))
 
     def save(self, *args, **kwargs):
-        # Ensure roll number
-        if not self.roll_number:
-            last = Student.objects.order_by('id').last()
-            if last and last.roll_number and last.roll_number.isdigit():
-                self.roll_number = str(int(last.roll_number) + 1)
-            else:
-                self.roll_number = "1001"
-        # If school_class is set, update grade and section from it
-        if self.school_class:
-            self.grade = self.school_class.name
-            self.section = self.school_class.section
-        # Set custom_fee from FeeStructure if not set
-        if not self.pk or self.custom_fee == 0:
-            base = FeeStructure.objects.filter(grade=self.grade).first()
-            if base:
-                self.custom_fee = base.monthly_fee
+        raw_password = getattr(self, '_raw_password', None)
+        if raw_password:
+            self.admin_password = make_password(raw_password)
+        elif self.admin_password and not self.is_password_hashed():
+            self._raw_password = self.admin_password
+            self.admin_password = make_password(self.admin_password)
         super().save(*args, **kwargs)
 
     def __str__(self):

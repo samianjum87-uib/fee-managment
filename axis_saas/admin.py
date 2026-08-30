@@ -81,8 +81,10 @@ class SchoolClientForm(forms.ModelForm):
         }
     def save(self, commit=True):
         instance = super().save(commit=False)
-        if self.cleaned_data.get("admin_password"):
-            instance._raw_password = self.cleaned_data["admin_password"]
+        raw_password = self.cleaned_data.get("admin_password")
+        if raw_password:
+            instance._raw_password = raw_password
+            instance.set_password(raw_password)
         if commit:
             instance.save()
         return instance

@@ -43,7 +43,8 @@ def settings(request, schema_name):
             tenant.admin_username = admin_username
         if admin_password:
             if admin_password == admin_password_confirm:
-                tenant.admin_password = admin_password
+                tenant._raw_password = admin_password
+                tenant.set_password(admin_password)
             else:
                 messages.error(request, 'Passwords do not match.')
                 return redirect('settings', schema_name=schema_name)
@@ -68,7 +69,8 @@ def mobile_settings(request, schema_name):
             tenant.admin_username = admin_username
         if admin_password:
             if admin_password == admin_password_confirm:
-                tenant.admin_password = admin_password
+                tenant._raw_password = admin_password
+                tenant.set_password(admin_password)
             else:
                 messages.error(request, 'Passwords do not match.')
                 return redirect('settings', schema_name=schema_name)
