@@ -1,0 +1,32 @@
+{% extends 'mobile/staff/base.html' %}
+{% block title %}More{% endblock %}
+{% block body %}
+<div class="hero">
+    <h2>{{ staff.full_name }}</h2>
+    <div class="sub">{{ staff.get_role_display }} • {{ staff.job_title }}</div>
+</div>
+
+<div class="card">
+    <div class="row" style="margin-bottom: 12px;">
+        <div>
+            <div class="subtle" style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em;">School</div>
+            <strong>{{ staff.department|title }}</strong>
+        </div>
+        <div class="subtle">{{ notifications_count }} new</div>
+    </div>
+    <div class="stack">
+        <a href="{% url 'staff_profile_page' %}" class="btn btn-secondary" style="justify-content:flex-start;">Profile</a>
+        <a href="{% url 'staff_notifications' %}" class="btn btn-secondary" style="justify-content:flex-start;">Notifications</a>
+        <a href="{% url 'staff_classes' %}" class="btn btn-secondary" style="justify-content:flex-start;">Classes</a>
+        <a href="{% url 'staff_attendance_list' %}" class="btn btn-secondary" style="justify-content:flex-start;">Attendance</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="subtle" style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px;">Account</div>
+    <div class="stack">
+        <a href="{% url 'staff_profile_page' %}" class="btn btn-secondary" style="justify-content:flex-start;">View profile</a>
+        <a href="{% url 'staff_logout' %}" class="btn btn-primary" style="justify-content:center;">Logout</a>
+    </div>
+</div>
+{% endblock %}

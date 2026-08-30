@@ -236,6 +236,20 @@ def staff_notifications(request):
 
 
 @require_staff_login
+@require_http_methods(['GET'])
+def staff_more(request):
+    schema_name = request.session['staff_schema_name']
+    from django_tenants.utils import schema_context
+    with schema_context(schema_name):
+        staff = Staff.objects.get(pk=request.session['staff_id'])
+        notifications_count = Notification.objects.filter(is_read=False).count()
+    return render(request, 'mobile/staff/more.html', {
+        'staff': staff,
+        'notifications_count': notifications_count,
+    })
+
+
+@require_staff_login
 @require_http_methods(['POST'])
 def staff_mark_notification_read(request, notif_id):
     schema_name = request.session['staff_schema_name']
