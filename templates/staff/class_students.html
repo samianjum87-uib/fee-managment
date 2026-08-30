@@ -1,0 +1,21 @@
+{% extends 'staff/base.html' %}
+{% block title %}Class Students{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>{{ school_class.name }} - {{ school_class.section }}</h2>
+  {% now "Y-m-d" as today %}
+  <a class="btn btn-secondary" href="{% url 'staff_attendance_mark' class_id=school_class.id attendance_date=today %}">Mark attendance</a>
+</div>
+<table>
+  <tr><th>Name</th><th>Roll</th><th>Status</th></tr>
+  {% for student in students %}
+  <tr>
+    <td><a href="{% url 'staff_student_profile' student_id=student.id %}">{{ student.name }}</a></td>
+    <td>{{ student.roll_number }}</td>
+    <td><span class="status {{ student.attendance_status }}">{{ student.attendance_status }}</span></td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="3">No students in this class.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

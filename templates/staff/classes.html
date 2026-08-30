@@ -1,0 +1,18 @@
+{% extends 'staff/base.html' %}
+{% block title %}My Classes{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>My Classes</h2>
+</div>
+{% for school_class in classes %}
+<div class="card">
+   <div class="row">
+      <div><strong>{{ school_class.name }} - {{ school_class.section }}</strong></div>
+      <a class="btn btn-primary" href="{% url 'staff_class_students' class_id=school_class.id %}">Students</a>
+   </div>
+   <div class="muted">{{ school_class.student_count }} students</div>
+</div>
+{% empty %}
+<div class="card"><p class="muted">No classes assigned.</p></div>
+{% endfor %}
+{% endblock %}

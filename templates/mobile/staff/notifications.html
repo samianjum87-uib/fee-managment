@@ -1,0 +1,15 @@
+{% extends 'mobile/base.html' %}
+{% block title %}Notifications{% endblock %}
+{% block body %}
+<div class="card">
+    <h2>Notifications</h2>
+</div>
+{% for notification in notifications %}
+<div class="card">
+    <div>{{ notification.message }}</div>
+    <div class="text-secondary" style="font-size: 0.75rem; margin-top: 4px;">{{ notification.created_at|date:'M d, Y h:i A' }}</div>
+</div>
+{% empty %}
+<div class="card"><p class="text-secondary">No notifications.</p></div>
+{% endfor %}
+{% endblock %}

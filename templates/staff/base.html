@@ -1,0 +1,74 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{% block title %}Staff Portal{% endblock %}</title>
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-alt: #eef4ff;
+            --text: #0f172a;
+            --muted: #475569;
+            --border: #e2e8f0;
+            --accent: #2563eb;
+            --accent-strong: #1d4ed8;
+            --success: #16a34a;
+            --warning: #f59e0b;
+            --danger: #dc2626;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; font-family: Arial, sans-serif; background: var(--bg); color: var(--text);
+        }
+        .topbar {
+            display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--surface);
+            border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10;
+        }
+        .brand { font-weight: 700; }
+        .nav { display: flex; gap: 10px; flex-wrap: wrap; }
+        .nav a { text-decoration: none; color: var(--muted); font-size: 12px; }
+        .container { max-width: 480px; margin: 0 auto; padding: 16px; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(15,23,42,.04); }
+        .btn { display: inline-block; padding: 10px 14px; border-radius: 10px; text-decoration: none; border: none; cursor: pointer; font-weight: 600; }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-secondary { background: var(--surface-alt); color: var(--text); }
+        .muted { color: var(--muted); }
+        .grid { display: grid; gap: 12px; }
+        .row { display: flex; justify-content: space-between; gap: 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; }
+        input, select, textarea, button { font: inherit; }
+        input, select, textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: white; }
+        .status { font-size: 12px; padding: 4px 8px; border-radius: 999px; display: inline-block; }
+        .status.present { background: rgba(22,163,74,.1); color: var(--success); }
+        .status.absent { background: rgba(220,38,38,.1); color: var(--danger); }
+        .status.late { background: rgba(245,158,11,.12); color: var(--warning); }
+        .alert { padding: 10px 12px; background: rgba(37,99,235,.08); border-left: 4px solid var(--accent); border-radius: 8px; }
+        .danger { color: var(--danger); }
+        @media (max-width: 480px) { .nav { font-size: 11px; } }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div class="topbar">
+        <div class="brand">AXIS Staff Portal</div>
+        <div class="nav">
+            <a href="{% url 'staff_dashboard' %}">Dashboard</a>
+            <a href="{% url 'staff_classes' %}">Classes</a>
+            <a href="{% url 'staff_attendance_list' %}">Attendance</a>
+            <a href="{% url 'staff_notifications' %}">Alerts</a>
+            <a href="{% url 'staff_profile_page' %}">Profile</a>
+            <a href="{% url 'staff_logout' %}">Logout</a>
+        </div>
+    </div>
+    <div class="container">
+        {% if messages %}
+            {% for message in messages %}<div class="alert">{{ message }}</div>{% endfor %}
+        {% endif %}
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

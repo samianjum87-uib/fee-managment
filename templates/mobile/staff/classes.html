@@ -1,0 +1,20 @@
+{% extends 'mobile/base.html' %}
+{% block title %}My Classes{% endblock %}
+{% block body %}
+<div class="card">
+    <h2>My Classes</h2>
+</div>
+{% for school_class in classes %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+        <div>
+            <strong>{{ school_class.name }} - {{ school_class.section }}</strong>
+            <div class="text-secondary" style="font-size: 0.8rem; margin-top: 4px;">{{ school_class.student_count }} students</div>
+        </div>
+        <a class="btn-primary" href="{% url 'staff_class_students' class_id=school_class.id %}" style="text-decoration:none; padding: 0.5rem 0.8rem; border-radius: 0.65rem; font-size: 0.8rem;">Students</a>
+    </div>
+</div>
+{% empty %}
+<div class="card"><p class="text-secondary">No classes assigned.</p></div>
+{% endfor %}
+{% endblock %}

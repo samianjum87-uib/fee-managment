@@ -1,0 +1,23 @@
+{% extends 'mobile/base.html' %}
+{% block title %}My Profile{% endblock %}
+{% block body %}
+<div class="card">
+    <h2>{{ staff.full_name }}</h2>
+    <div class="text-secondary">{{ staff.job_title }} · {{ staff.get_role_display }}</div>
+</div>
+<div class="card">
+    <p><strong>Email:</strong> {{ staff.email|default:'N/A' }}</p>
+    <p><strong>Phone:</strong> {{ staff.phone|default:'N/A' }}</p>
+    <p><strong>Department:</strong> {{ staff.get_department_display }}</p>
+</div>
+<div class="card">
+    <h3>Change Password</h3>
+    <form method="post" action="{% url 'staff_change_password' %}" style="display:grid; gap:10px;">
+        {% csrf_token %}
+        <input type="password" name="old_password" placeholder="Current password" required style="width:100%; padding: 0.7rem 0.8rem; border:1px solid var(--border); border-radius:0.7rem;">
+        <input type="password" name="new_password" placeholder="New password" required style="width:100%; padding: 0.7rem 0.8rem; border:1px solid var(--border); border-radius:0.7rem;">
+        <input type="password" name="confirm_password" placeholder="Confirm new password" required style="width:100%; padding: 0.7rem 0.8rem; border:1px solid var(--border); border-radius:0.7rem;">
+        <button type="submit" class="btn-primary" style="padding: 0.75rem; border-radius: 0.75rem;">Update</button>
+    </form>
+</div>
+{% endblock %}

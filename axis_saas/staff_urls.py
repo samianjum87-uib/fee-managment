@@ -1,0 +1,40 @@
+from django.urls import path
+
+from axis_saas.views.staff_portal import (
+    staff_api_attendance,
+    staff_api_attendance_submit,
+    staff_api_classes,
+    staff_api_profile,
+    staff_attendance_list,
+    staff_attendance_mark,
+    staff_change_password,
+    staff_class_students,
+    staff_classes,
+    staff_dashboard,
+    staff_login,
+    staff_logout,
+    staff_mark_notification_read,
+    staff_notifications,
+    staff_profile,
+    staff_student_profile,
+)
+
+urlpatterns = [
+    path('', staff_dashboard, name='staff_dashboard_root'),
+    path('login/', staff_login, name='staff_login'),
+    path('logout/', staff_logout, name='staff_logout'),
+    path('dashboard/', staff_dashboard, name='staff_dashboard'),
+    path('classes/', staff_classes, name='staff_classes'),
+    path('classes/<int:class_id>/students/', staff_class_students, name='staff_class_students'),
+    path('attendance/', staff_attendance_list, name='staff_attendance_list'),
+    path('attendance/<int:class_id>/<str:attendance_date>/', staff_attendance_mark, name='staff_attendance_mark'),
+    path('students/<int:student_id>/', staff_student_profile, name='staff_student_profile'),
+    path('profile/', staff_profile, name='staff_profile_page'),
+    path('profile/change-password/', staff_change_password, name='staff_change_password'),
+    path('notifications/', staff_notifications, name='staff_notifications'),
+    path('notifications/<int:notif_id>/mark-read/', staff_mark_notification_read, name='staff_mark_notification_read'),
+    path('api/classes/', staff_api_classes, name='staff_api_classes'),
+    path('api/profile/', staff_api_profile, name='staff_api_profile'),
+    path('api/attendance/<int:class_id>/<str:attendance_date>/', staff_api_attendance, name='staff_api_attendance'),
+    path('api/attendance/<int:class_id>/<str:attendance_date>/submit/', staff_api_attendance_submit, name='staff_api_attendance_submit'),
+]

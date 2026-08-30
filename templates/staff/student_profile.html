@@ -1,0 +1,25 @@
+{% extends 'staff/base.html' %}
+{% block title %}Student Profile{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>{{ student.name }}</h2>
+  <div class="muted">{{ student.grade }} · {{ student.section }}</div>
+</div>
+<div class="card">
+  <p><strong>Father:</strong> {{ student.father_name }}</p>
+  <p><strong>Roll Number:</strong> {{ student.roll_number }}</p>
+  <p><strong>Phone:</strong> {{ student.parent_mobile }}</p>
+  <p><strong>Status:</strong> {{ student.get_status_display }}</p>
+</div>
+<div class="card">
+  <h3>Recent Attendance</h3>
+  {% for item in attendance_summary %}
+    <div class="row" style="padding:8px 0; border-bottom:1px solid #e2e8f0;">
+      <div>{{ item.date }}</div>
+      <span class="status {{ item.status }}">{{ item.status }}</span>
+    </div>
+  {% empty %}
+    <p class="muted">No attendance recorded yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

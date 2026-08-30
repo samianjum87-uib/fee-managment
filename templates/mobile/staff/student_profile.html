@@ -1,0 +1,24 @@
+{% extends 'mobile/base.html' %}
+{% block title %}Student Profile{% endblock %}
+{% block body %}
+<div class="card">
+    <h2>{{ student.name }}</h2>
+    <div class="text-secondary">Roll #: {{ student.roll_number }}</div>
+</div>
+<div class="card">
+    <p><strong>Class:</strong> {{ student.school_class.name }} - {{ student.school_class.section }}</p>
+    <p><strong>Guardian:</strong> {{ student.father_name|default:'N/A' }}</p>
+    <p><strong>Phone:</strong> {{ student.phone_number|default:'N/A' }}</p>
+</div>
+<div class="card">
+    <h3>Recent Attendance</h3>
+    {% for record in attendance_summary %}
+        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border);">
+            <span>{{ record.date }}</span>
+            <span>{{ record.status|title }}</span>
+        </div>
+    {% empty %}
+        <p class="text-secondary">No attendance records.</p>
+    {% endfor %}
+</div>
+{% endblock %}

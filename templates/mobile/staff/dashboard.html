@@ -1,0 +1,46 @@
+{% extends 'mobile/base.html' %}
+{% block title %}Staff Dashboard{% endblock %}
+{% block body %}
+<div class="card">
+    <h2 style="margin-bottom: 4px;">Welcome, {{ staff.full_name }}</h2>
+    <div class="text-secondary">{{ staff.get_role_display }}</div>
+</div>
+
+<div style="display:grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr));">
+    <div class="card" style="padding: 0.9rem;">
+        <div class="text-secondary" style="font-size: 12px;">Classes</div>
+        <div style="font-size: 1.6rem; font-weight: 700; margin-top: 0.25rem;">{{ classes|length }}</div>
+    </div>
+    <div class="card" style="padding: 0.9rem;">
+        <div class="text-secondary" style="font-size: 12px;">Students</div>
+        <div style="font-size: 1.6rem; font-weight: 700; margin-top: 0.25rem;">{{ student_count }}</div>
+    </div>
+    <div class="card" style="padding: 0.9rem;">
+        <div class="text-secondary" style="font-size: 12px;">Today</div>
+        <div style="font-size: 1.6rem; font-weight: 700; margin-top: 0.25rem;">{{ attendance_today }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3 style="margin-bottom: 12px;">Assigned Classes</h3>
+    {% for school_class in classes %}
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 12px 0; border-bottom: 1px solid var(--border);">
+            <div>
+                <strong>{{ school_class.name }} - {{ school_class.section }}</strong>
+            </div>
+            <a class="btn-primary" href="{% url 'staff_class_students' class_id=school_class.id %}" style="text-decoration:none; padding: 0.45rem 0.8rem; border-radius: 0.65rem; font-size: 0.8rem;">View</a>
+        </div>
+    {% empty %}
+        <p class="text-secondary">No assigned classes.</p>
+    {% endfor %}
+</div>
+
+<div class="card">
+    <h3 style="margin-bottom: 12px;">Recent Notifications</h3>
+    {% for notification in notifications %}
+        <div style="padding: 10px 0; border-bottom: 1px solid var(--border);">{{ notification.message }}</div>
+    {% empty %}
+        <p class="text-secondary">No notifications.</p>
+    {% endfor %}
+</div>
+{% endblock %}

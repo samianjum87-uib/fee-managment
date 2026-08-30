@@ -240,6 +240,16 @@ class StaffAdmin(admin.ModelAdmin):
     search_fields = ('staff_id', 'full_name', 'email', 'phone')
     readonly_fields = ('staff_id',)
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        generated = getattr(obj, '_generated_password', None)
+        if generated:
+            self.message_user(
+                request,
+                f"Staff portal credentials generated: username={obj.email or obj.full_name.lower().replace(' ', '.')} and password={generated}",
+                level=20,
+            )
+
 @admin.register(FeeStructure)
 class FeeStructureAdmin(TenantOnlyAdminMixin, admin.ModelAdmin):
     list_display = ('grade', 'monthly_fee', 'updated_at')

@@ -1,0 +1,15 @@
+{% extends 'staff/base.html' %}
+{% block title %}Notifications{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Notifications</h2>
+</div>
+{% for notification in notifications %}
+<div class="card">
+  <div>{{ notification.message }}</div>
+  <div class="muted">{{ notification.created_at|date:'M d, Y H:i' }}</div>
+</div>
+{% empty %}
+<div class="card"><p class="muted">No notifications.</p></div>
+{% endfor %}
+{% endblock %}

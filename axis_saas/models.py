@@ -1,3 +1,6 @@
+import random
+import string
+
 from django.utils import timezone
 from django.db import models
 from django_tenants.models import TenantMixin, DomainMixin
@@ -489,6 +492,50 @@ class Notification(models.Model):
     def __str__(self):
         return self.message[:50]
 
+
+class StaffCredential(models.Model):
+    """Authentication record for staff across all public-school tenants."""
+    username = models.CharField(max_length=150, unique=True)
+    password = models.CharField(max_length=128)
+    staff_id = models.PositiveIntegerField()
+    schema_name = models.CharField(max_length=63)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_login = models.DateTimeField(null=True, blank=True)
+    failed_attempts = models.PositiveIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['username']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.raw_password = None
+
+    def check_password(self, raw_password):
+        return check_password(raw_password, self.password)
+
+    def increment_failed_attempts(self):
+        self.failed_attempts = (self.failed_attempts or 0) + 1
+        if self.failed_attempts >= 5:
+            from datetime import timedelta
+            self.locked_until = timezone.now() + timedelta(minutes=15)
+        self.save(update_fields=['failed_attempts', 'locked_until'])
+        return self.failed_attempts
+
+    def reset_failed_attempts(self):
+        self.failed_attempts = 0
+        self.locked_until = None
+        self.save(update_fields=['failed_attempts', 'locked_until'])
+
+    def set_password(self, raw_password):
+        self.raw_password = raw_password
+        self.password = make_password(raw_password)
+
+    def __str__(self):
+        return f"{self.username} ({self.schema_name})"
+
+
 # ------------------- Staff Model -------------------
 class Staff(models.Model):
     GENDER_CHOICES = [
@@ -501,6 +548,12 @@ class Staff(models.Model):
         ('teaching', 'Teaching'),
         ('support', 'Support Staff'),
         ('other', 'Other'),
+    ]
+    ROLE_CHOICES = [
+        ('teacher', 'Teacher'),
+        ('class_teacher', 'Class Teacher'),
+        ('subject_teacher', 'Subject Teacher'),
+        ('admin', 'Admin'),
     ]
     STATUS_CHOICES = [
         ('active', 'Active'),
@@ -516,6 +569,9 @@ class Staff(models.Model):
     email = models.EmailField(unique=True, blank=True, null=True)
     job_title = models.CharField(max_length=100)
     department = models.CharField(max_length=50, choices=DEPARTMENT_CHOICES, default='teaching')
+    role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='teacher')
+    can_mark_attendance = models.BooleanField(default=True)
+    can_view_fees = models.BooleanField(default=False)
     hire_date = models.DateField(default=timezone.now)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     phone = models.CharField(max_length=15, blank=True, null=True)
@@ -528,6 +584,43 @@ class Staff(models.Model):
     class Meta:
         ordering = ['-created_on']
 
+    def generate_unique_username(self):
+        base = f"{self.first_name.strip().lower()}.{self.last_name.strip().lower()}".replace(' ', '.')
+        if not base or base == '.':
+            base = 'staff'
+        while True:
+            suffix = ''.join(random.choice(string.digits) for _ in range(4))
+            username = f"{base}.{suffix}"
+            if not StaffCredential.objects.filter(username=username).exists():
+                return username
+
+    def generate_password(self):
+        alphabet = string.ascii_letters + string.digits + '!@#$%^&*'
+        while True:
+            password = ''.join(random.choice(alphabet) for _ in range(14))
+            if any(c.isupper() for c in password) and any(c.islower() for c in password) and any(c.isdigit() for c in password) and any(c in '!@#$%^&*' for c in password):
+                return password
+
+    def ensure_staff_credential(self, force_new=False):
+        from django.db import connection
+        from django_tenants.utils import schema_context
+        if not self.pk:
+            return None
+        schema_name = getattr(connection, 'schema_name', None) or 'public'
+        with schema_context('public'):
+            credential = StaffCredential.objects.filter(staff_id=self.pk, schema_name=schema_name).first()
+            if credential is None or force_new:
+                raw_password = self.generate_password()
+                username = self.generate_unique_username()
+                credential = StaffCredential(username=username, staff_id=self.pk, schema_name=schema_name)
+                credential.set_password(raw_password)
+                credential.is_active = True
+                credential.save()
+                credential.raw_password = raw_password
+            else:
+                credential.raw_password = None
+            return credential
+
     def save(self, *args, **kwargs):
         if not self.staff_id:
             last = Staff.objects.order_by('id').last()
@@ -536,10 +629,45 @@ class Staff(models.Model):
             else:
                 self.staff_id = "1001"
         self.full_name = f"{self.first_name} {self.last_name}".strip()
+        is_new = self.pk is None
         super().save(*args, **kwargs)
+        self._generated_password = None
+        self._generated_username = None
+        try:
+            credential = self.ensure_staff_credential(force_new=is_new)
+            if credential:
+                self._generated_password = getattr(credential, 'raw_password', None)
+                self._generated_username = credential.username
+        except Exception:
+            pass
 
     def __str__(self):
         return f"{self.full_name} ({self.staff_id})"
+
+
+class StudentAttendance(models.Model):
+    STATUS_CHOICES = [
+        ('present', 'Present'),
+        ('absent', 'Absent'),
+        ('late', 'Late'),
+        ('holiday', 'Holiday'),
+    ]
+    student = models.ForeignKey('Student', on_delete=models.CASCADE, related_name='attendance_records')
+    school_class = models.ForeignKey('SchoolClass', on_delete=models.CASCADE, related_name='attendance_records')
+    date = models.DateField(default=timezone.localdate)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='present')
+    teacher = models.ForeignKey('Staff', on_delete=models.SET_NULL, null=True, blank=True, related_name='marked_attendance')
+    remarks = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('student', 'date')
+        ordering = ['-date', 'student__name']
+        indexes = [models.Index(fields=['school_class', 'date'])]
+
+    def __str__(self):
+        return f"{self.student.name} - {self.date} - {self.get_status_display()}"
 
 
 # ========== CLASS & SUBJECT MANAGEMENT ==========

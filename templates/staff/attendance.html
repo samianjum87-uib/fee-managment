@@ -1,0 +1,17 @@
+{% extends 'staff/base.html' %}
+{% block title %}Attendance{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Attendance</h2>
+</div>
+{% for class in classes %}
+<div class="card">
+  <div class="row">
+    <div><strong>{{ class.name }} - {{ class.section }}</strong></div>
+    <a class="btn btn-primary" href="{% url 'staff_attendance_mark' class_id=class.id attendance_date='2026-08-30' %}">Take</a>
+  </div>
+</div>
+{% empty %}
+<div class="card"><p class="muted">No classes assigned.</p></div>
+{% endfor %}
+{% endblock %}
