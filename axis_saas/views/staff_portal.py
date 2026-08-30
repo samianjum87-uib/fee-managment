@@ -309,9 +309,12 @@ def staff_submit_2fa(request):
     return JsonResponse({'success': True, 'message': 'Verification successful.'})
 
 @require_staff_login
-@require_http_methods(['POST'])
+@require_http_methods(['GET', 'POST'])
 def staff_toggle_2fa(request):
     from django_tenants.utils import schema_context
+
+    if request.method == 'GET':
+        return redirect('staff_profile_page')
 
     schema_name = request.session['staff_schema_name']
     action = request.POST.get('action', 'enable')
