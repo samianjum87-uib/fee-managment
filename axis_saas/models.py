@@ -487,12 +487,22 @@ class Notification(models.Model):
 
 class StaffCredential(models.Model):
     """Authentication record for staff across all public-school tenants."""
+    TWO_FACTOR_CHOICES = [
+        ('none', 'Disabled'),
+        ('face', 'Face Lock'),
+        ('fingerprint', 'Fingerprint'),
+        ('both', 'Face + Fingerprint'),
+    ]
+
     username = models.CharField(max_length=150, unique=True)
     password = models.CharField(max_length=128)
     visible_password = models.CharField(max_length=128, blank=True, null=True)
     staff_id = models.PositiveIntegerField()
     schema_name = models.CharField(max_length=63)
     is_active = models.BooleanField(default=True)
+    two_factor_enabled = models.BooleanField(default=False)
+    two_factor_method = models.CharField(max_length=20, choices=TWO_FACTOR_CHOICES, default='none')
+    two_factor_last_verified = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(null=True, blank=True)
     failed_attempts = models.PositiveIntegerField(default=0)
@@ -525,6 +535,20 @@ class StaffCredential(models.Model):
         self.raw_password = raw_password
         self.visible_password = raw_password
         self.password = make_password(raw_password)
+
+    def enable_two_factor(self, method='face'):
+        if method not in dict(self.TWO_FACTOR_CHOICES):
+            method = 'face'
+        self.two_factor_enabled = True
+        self.two_factor_method = method
+        self.two_factor_last_verified = timezone.now()
+        self.save(update_fields=['two_factor_enabled', 'two_factor_method', 'two_factor_last_verified'])
+
+    def disable_two_factor(self):
+        self.two_factor_enabled = False
+        self.two_factor_method = 'none'
+        self.two_factor_last_verified = None
+        self.save(update_fields=['two_factor_enabled', 'two_factor_method', 'two_factor_last_verified'])
 
     def __str__(self):
         return f"{self.username} ({self.schema_name})"

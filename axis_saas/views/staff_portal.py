@@ -2,6 +2,8 @@ import json
 import uuid
 from datetime import datetime
 
+from django.contrib.auth.hashers import make_password
+
 from django.core.cache import cache
 from django.db import connection
 from django.contrib import messages
@@ -50,6 +52,25 @@ def staff_login(request):
                 credential.reset_failed_attempts()
                 credential.last_login = timezone.now()
                 credential.save(update_fields=['last_login', 'failed_attempts', 'locked_until'])
+
+                two_factor_required = getattr(credential, 'two_factor_enabled', False)
+                if two_factor_required:
+                    request.session.flush()
+                    request.session['staff_id'] = staff.pk
+                    request.session['staff_schema_name'] = credential.schema_name
+                    request.session['staff_username'] = credential.username
+                    request.session['staff_role'] = staff.role
+                    request.session['staff_name'] = staff.full_name
+                    request.session['staff_2fa_pending'] = True
+                    request.session['staff_2fa_method'] = credential.two_factor_method
+                    request.session['staff_session_token'] = uuid.uuid4().hex
+                    request.session.set_expiry(1800)
+                    request.session.modified = True
+                    return render(request, 'mobile/staff/login_2fa.html', {
+                        'staff': staff,
+                        'method': credential.two_factor_method,
+                        'method_label': dict(StaffCredential.TWO_FACTOR_CHOICES).get(credential.two_factor_method, 'Biometric verification'),
+                    })
 
                 request.session.flush()
                 request.session['school_admin_authenticated'] = False
@@ -105,6 +126,13 @@ def staff_logout(request):
 def require_staff_login(view_func):
     def wrapped(request, *args, **kwargs):
         if not request.session.get('staff_id') or not request.session.get('staff_schema_name'):
+            return redirect('staff_login')
+        schema_name = request.session.get('staff_schema_name')
+        staff_id = request.session.get('staff_id')
+        session_token = request.session.get('staff_session_token')
+        cached_token = cache.get(f'staff_session_token:{schema_name}:{staff_id}') if schema_name and staff_id else None
+        if not session_token or cached_token in [None, 'logged_out'] or cached_token != session_token:
+            request.session.flush()
             return redirect('staff_login')
         return view_func(request, *args, **kwargs)
     return wrapped
@@ -227,7 +255,60 @@ def staff_profile(request):
         credential = StaffCredential.objects.filter(staff_id=staff.pk, schema_name=schema_name).first()
     if credential is not None:
         credential.raw_password = None
-    return render(request, 'mobile/staff/profile.html', {'staff': staff, 'credential': credential})
+    return render(request, 'mobile/staff/profile.html', {'staff': staff, 'credential': credential, 'two_factor_enabled': getattr(credential, 'two_factor_enabled', False), 'two_factor_method': getattr(credential, 'two_factor_method', 'none')})
+
+@require_staff_login
+@require_http_methods(['POST'])
+def staff_submit_2fa(request):
+    schema_name = request.session.get('staff_schema_name')
+    staff_id = request.session.get('staff_id')
+    pending = request.session.get('staff_2fa_pending')
+    if not schema_name or not staff_id or not pending:
+        return JsonResponse({'success': False, 'message': 'Verification required.'}, status=403)
+
+    method = request.POST.get('method')
+    token = request.POST.get('token') or ''
+    if method not in ['face', 'fingerprint', 'both']:
+        return JsonResponse({'success': False, 'message': 'Biometric method is invalid.'}, status=400)
+
+    with schema_context('public'):
+        credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
+        if credential is None or not credential.two_factor_enabled:
+            return JsonResponse({'success': False, 'message': 'Two-factor authentication is not enabled.'}, status=403)
+
+    session_token = uuid.uuid4().hex
+    request.session['staff_2fa_pending'] = False
+    request.session['staff_session_token'] = session_token
+    request.session['school_admin_authenticated'] = False
+    request.session['school_admin_schema'] = ''
+    request.session.modified = True
+    cache.set(f'staff_session_token:{schema_name}:{staff_id}', session_token, 1800)
+    return JsonResponse({'success': True, 'message': 'Verification successful.'})
+
+@require_staff_login
+@require_http_methods(['POST'])
+def staff_toggle_2fa(request):
+    schema_name = request.session['staff_schema_name']
+    action = request.POST.get('action', 'enable')
+    method = request.POST.get('method', 'face')
+    user_id = request.POST.get('user_id')
+    with schema_context('public'):
+        credential = StaffCredential.objects.filter(staff_id=request.session['staff_id'], schema_name=schema_name).first()
+        if credential is None:
+            return JsonResponse({'success': False, 'message': 'Staff credential not found.'}, status=404)
+        if action == 'enable':
+            if method not in ['face', 'fingerprint', 'both']:
+                return JsonResponse({'success': False, 'message': 'Invalid method selected.'}, status=400)
+            credential.enable_two_factor(method)
+            return JsonResponse({'success': True, 'message': 'Two-factor authentication enabled.', 'method': method})
+        if action == 'disable':
+            credential.disable_two_factor()
+            return JsonResponse({'success': True, 'message': 'Two-factor authentication disabled.'})
+        if action == 'reset':
+            credential.disable_two_factor()
+            credential.enable_two_factor(method)
+            return JsonResponse({'success': True, 'message': 'Two-factor authentication reset successfully.', 'method': method})
+    return JsonResponse({'success': False, 'message': 'Unknown action.'}, status=400)
 
 
 @require_staff_login
@@ -240,6 +321,7 @@ def staff_change_password(request):
     confirm_password = request.POST.get('confirm_password')
     cnic = (request.POST.get('cnic') or '').strip()
     dob = request.POST.get('date_of_birth')
+    biometric_verified = request.POST.get('biometric_verified') == '1'
 
     with schema_context(schema_name):
         staff = Staff.objects.filter(pk=request.session['staff_id']).first()
@@ -251,12 +333,18 @@ def staff_change_password(request):
             messages.error(request, 'This account is suspended and cannot change password.')
             return redirect('staff_profile_page')
 
-        cnic_ok = bool(staff.cnic) and str(staff.cnic).replace('-', '').replace(' ', '').lower() == str(cnic).replace('-', '').replace(' ', '').lower()
-        dob_ok = bool(staff.date_of_birth) and staff.date_of_birth.isoformat() == str(dob)
-        if not cnic_ok or not dob_ok:
+        if request.POST.get('verify_type') == 'self_reset':
+            cnic_ok = bool(staff.cnic) and str(staff.cnic).replace('-', '').replace(' ', '').lower() == str(cnic).replace('-', '').replace(' ', '').lower()
+            dob_ok = bool(staff.date_of_birth) and staff.date_of_birth.isoformat() == str(dob)
+            if not cnic_ok or not dob_ok:
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': 'Your CNIC and date of birth do not match the staff record.'}, status=400)
+                messages.error(request, 'Your CNIC and date of birth do not match the staff record.')
+                return redirect('staff_profile_page')
+        elif not biometric_verified:
             if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'message': 'Your CNIC and date of birth do not match the staff record.'}, status=400)
-            messages.error(request, 'Your CNIC and date of birth do not match the staff record.')
+                return JsonResponse({'success': False, 'message': 'Biometric verification is required before changing the password.'}, status=400)
+            messages.error(request, 'Biometric verification is required before changing the password.')
             return redirect('staff_profile_page')
 
     with schema_context('public'):
@@ -277,7 +365,7 @@ def staff_change_password(request):
             messages.error(request, 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.')
             return redirect('staff_profile_page')
         credential.set_password(new_password)
-        credential.save(update_fields=['password'])
+        credential.save(update_fields=['password', 'visible_password'])
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'success': True, 'message': 'Password updated successfully.'})
         messages.success(request, 'Password updated successfully.')

@@ -26,6 +26,40 @@
 </div>
 {% endif %}
 <div class="card">
+    <h3>Security & 2-Step Auth</h3>
+    <div class="stack">
+        <div class="subtle" style="font-size:12px; text-transform: uppercase; letter-spacing: 0.06em;">Current status</div>
+        <div style="font-weight:700;">{% if two_factor_enabled %}Enabled · {{ two_factor_method|title }}{% else %}Disabled{% endif %}</div>
+        <div class="stack" style="margin-top:8px;">
+            <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="enable">
+                <select name="method">
+                    <option value="face">Face Lock</option>
+                    <option value="fingerprint">Fingerprint</option>
+                    <option value="both">Face + Fingerprint</option>
+                </select>
+                <button type="submit" class="btn-primary">Enable 2-Step</button>
+            </form>
+            <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="disable">
+                <button type="submit" class="btn-secondary" style="color: var(--danger);">Disable 2-Step</button>
+            </form>
+            <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="reset">
+                <select name="method">
+                    <option value="face">Reset to Face Lock</option>
+                    <option value="fingerprint">Reset to Fingerprint</option>
+                    <option value="both">Reset to Face + Fingerprint</option>
+                </select>
+                <button type="submit" class="btn-secondary">Reset Security</button>
+            </form>
+        </div>
+    </div>
+</div>
+<div class="card">
     <h3>Change Password</h3>
     <form method="post" action="{% url 'staff_change_password' %}" class="stack">
         {% csrf_token %}
@@ -34,6 +68,8 @@
         <input type="password" name="old_password" placeholder="Current password" required>
         <input type="password" name="new_password" placeholder="New password" required>
         <input type="password" name="confirm_password" placeholder="Confirm new password" required>
+        <input type="hidden" name="verify_type" value="self_reset">
+        <input type="hidden" name="biometric_verified" value="1">
         <button type="submit" class="btn-primary">Update</button>
     </form>
 </div>
