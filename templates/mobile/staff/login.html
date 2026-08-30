@@ -1,4 +1,5 @@
 {% extends 'mobile/staff/base.html' %}
+{% load static %}
 {% block title %}Staff Login{% endblock %}
 {% block body %}
 <div class="card" style="max-width: 420px; margin: 42px auto 0;">
@@ -26,58 +27,14 @@
         Secure access is enforced with device-bound passkeys using FIDO2/WebAuthn and requires the browser to support platform or security-key authenticators.
     </div>
 </div>
+<script src="{% static 'js/simplewebauthn-browser.min.js' %}"></script>
 <script>
-    window.__simpleWebAuthnLibraryUrls = [
-        'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@9.1.1/dist/bundle/index.umd.min.js',
-        'https://unpkg.com/@simplewebauthn/browser@9.1.1/dist/bundle/index.umd.min.js'
-    ];
-
-    window.ensureSimpleWebAuthnLoaded = function(mode = 'authentication') {
-        const hasRequiredApi = window.SimpleWebAuthnBrowser && (
-            (mode === 'registration' && window.SimpleWebAuthnBrowser.startRegistration) ||
-            (mode === 'authentication' && window.SimpleWebAuthnBrowser.startAuthentication)
-        );
-
-        if (hasRequiredApi) {
-            return Promise.resolve(true);
+    function ensureWebAuthnLibrary() {
+        if (window.SimpleWebAuthnBrowser && window.SimpleWebAuthnBrowser.startAuthentication) {
+            return true;
         }
-
-        if (!window.__simpleWebAuthnLibraryPromise) {
-            window.__simpleWebAuthnLibraryPromise = new Promise((resolve, reject) => {
-                let lastError = null;
-                const tryNext = (index) => {
-                    if (index >= window.__simpleWebAuthnLibraryUrls.length) {
-                        reject(lastError || new Error('SimpleWebAuthn library could not be loaded.'));
-                        return;
-                    }
-
-                    const script = document.createElement('script');
-                    script.src = window.__simpleWebAuthnLibraryUrls[index];
-                    script.async = false;
-                    script.onload = function () {
-                        const ok = window.SimpleWebAuthnBrowser && (
-                            (mode === 'registration' && window.SimpleWebAuthnBrowser.startRegistration) ||
-                            (mode === 'authentication' && window.SimpleWebAuthnBrowser.startAuthentication)
-                        );
-                        if (ok) {
-                            resolve(true);
-                            return;
-                        }
-                        tryNext(index + 1);
-                    };
-                    script.onerror = function (error) {
-                        lastError = error;
-                        tryNext(index + 1);
-                    };
-                    document.head.appendChild(script);
-                };
-
-                tryNext(0);
-            });
-        }
-
-        return window.__simpleWebAuthnLibraryPromise;
-    };
+        throw new Error('The WebAuthn browser library could not be loaded. Please refresh the page or check your network connection.');
+    }
 
     function getCookie(name) {
         const value = `; ${document.cookie}`;
@@ -105,11 +62,7 @@
     }
 
     async function ensureWebAuthnSupport() {
-        try {
-            await window.ensureSimpleWebAuthnLoaded('authentication');
-        } catch (error) {
-            throw new Error('The WebAuthn browser library could not be loaded. Please refresh the page or check your network connection.');
-        }
+        ensureWebAuthnLibrary();
 
         if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.get) {
             throw new Error('This browser does not support native WebAuthn passkeys. Use Chrome, Edge, Firefox, or Safari with a compatible device.');
