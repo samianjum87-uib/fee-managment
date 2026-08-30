@@ -149,7 +149,7 @@ def get_staff_profile_context(request, schema_name, staff_id):
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=staff.id, schema_name=schema_name).first()
     if credential is not None:
-        credential.raw_password = getattr(staff, '_generated_password', None) or getattr(credential, 'raw_password', None)
+        credential.raw_password = None
     return {
         'tenant': tenant,
         'classes': classes,
@@ -160,6 +160,97 @@ def get_staff_profile_context(request, schema_name, staff_id):
         'credential': credential,
         'logo_url': tenant.school_logo.url if tenant.school_logo else None,
     }
+
+@require_tenant_type(['school'])
+@require_school_feature('staff_management')
+@require_http_methods(['POST'])
+def staff_toggle_status(request, schema_name, staff_id):
+    with schema_context(schema_name):
+        staff = get_object_or_404(Staff, id=staff_id)
+        new_status = request.POST.get('status')
+        if new_status not in ['active', 'inactive']:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'Invalid status.'}, status=400)
+            messages.error(request, 'Invalid status.')
+            return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+        staff.status = new_status
+        staff.save(update_fields=['status'])
+        if new_status != 'active':
+            staff.logout_session()
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+        return JsonResponse({'success': True, 'status': staff.status, 'message': 'Staff status updated.'})
+    messages.success(request, 'Staff status updated.')
+    return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+
+@require_tenant_type(['school'])
+@require_school_feature('staff_management')
+@require_http_methods(['POST'])
+def staff_force_logout(request, schema_name, staff_id):
+    with schema_context(schema_name):
+        staff = get_object_or_404(Staff, id=staff_id)
+        staff.logout_session()
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+        return JsonResponse({'success': True, 'message': 'Staff account has been logged out.'})
+    messages.success(request, 'Staff account has been logged out.')
+    return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+
+@require_tenant_type(['school'])
+@require_school_feature('staff_management')
+@require_http_methods(['POST'])
+def staff_reset_password(request, schema_name, staff_id):
+    cnic = (request.POST.get('cnic') or '').strip()
+    dob = request.POST.get('date_of_birth')
+    new_password = request.POST.get('new_password')
+    confirm_password = request.POST.get('confirm_password')
+
+    if not cnic or not dob or not new_password or not confirm_password:
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'message': 'All fields are required.'}, status=400)
+        messages.error(request, 'All fields are required.')
+        return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+
+    with schema_context(schema_name):
+        staff = get_object_or_404(Staff, id=staff_id)
+        if staff.cnic and str(staff.cnic).replace('-', '').replace(' ', '').lower() != str(cnic).replace('-', '').replace(' ', '').lower():
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'CNIC does not match this staff record.'}, status=400)
+            messages.error(request, 'CNIC does not match this staff record.')
+            return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+        try:
+            if staff.date_of_birth and staff.date_of_birth.isoformat() != str(dob):
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': 'Date of birth does not match this staff record.'}, status=400)
+                messages.error(request, 'Date of birth does not match this staff record.')
+                return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+        except Exception:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'Date of birth must be valid.'}, status=400)
+            messages.error(request, 'Date of birth must be valid.')
+            return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+
+    with schema_context('public'):
+        credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
+        if credential is None:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'Staff credential not found.'}, status=404)
+            messages.error(request, 'Staff credential not found.')
+            return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+        if new_password != confirm_password:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'New passwords do not match.'}, status=400)
+            messages.error(request, 'New passwords do not match.')
+            return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+        if len(new_password) < 12 or not any(ch.isupper() for ch in new_password) or not any(ch.isdigit() for ch in new_password) or not any(ch in '!@#$%^&*' for ch in new_password):
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.'}, status=400)
+            messages.error(request, 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.')
+            return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
+        credential.set_password(new_password)
+        credential.save(update_fields=['password'])
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'success': True, 'message': 'Password reset successfully.'})
+        messages.success(request, 'Password reset successfully.')
+        return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
 def staff_add(request, schema_name):
     tenant = get_tenant(request, schema_name)
     with schema_context(schema_name):

@@ -558,6 +558,7 @@ class Staff(models.Model):
     full_name = models.CharField(max_length=200, blank=True)  # computed
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True, null=True)
     date_of_birth = models.DateField(blank=True, null=True)
+    cnic = models.CharField(max_length=20, blank=True, null=True)
     email = models.EmailField(unique=True, blank=True, null=True)
     job_title = models.CharField(max_length=100)
     department = models.CharField(max_length=50, choices=DEPARTMENT_CHOICES, default='teaching')
@@ -647,6 +648,31 @@ class Staff(models.Model):
                 self._generated_username = credential.username
         except Exception:
             pass
+
+    @property
+    def is_online(self):
+        from django.core.cache import cache
+        from django.db import connection
+        schema_name = getattr(connection, 'schema_name', None) or 'public'
+        session_key = cache.get(f'staff_online:{schema_name}:{self.pk}')
+        return bool(session_key)
+
+    def logout_session(self):
+        from django.core.cache import cache
+        from django.contrib.sessions.backends.db import SessionStore
+        from django.db import connection
+        schema_name = getattr(connection, 'schema_name', None) or 'public'
+        keys = cache.get(f'staff_session_keys:{schema_name}:{self.pk}', [])
+        if isinstance(keys, str):
+            keys = [keys]
+        for key in list(keys):
+            try:
+                session = SessionStore(session_key=key)
+                session.flush()
+            except Exception:
+                pass
+        cache.delete(f'staff_online:{schema_name}:{self.pk}')
+        cache.delete(f'staff_session_keys:{schema_name}:{self.pk}')
 
     def __str__(self):
         return f"{self.full_name} ({self.staff_id})"

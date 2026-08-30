@@ -37,8 +37,39 @@
     <div class="info-card"><div class="info-label">Phone</div><div class="info-value">{{ staff.phone|default:"—" }}</div></div>
     <div class="info-card"><div class="info-label">Gender</div><div class="info-value">{{ staff.get_gender_display|default:"—" }}</div></div>
     <div class="info-card"><div class="info-label">Date of Birth</div><div class="info-value">{{ staff.date_of_birth|date:"Y-m-d"|default:"—" }}</div></div>
+    <div class="info-card"><div class="info-label">CNIC</div><div class="info-value">{{ staff.cnic|default:"—" }}</div></div>
+    <div class="info-card"><div class="info-label">Status</div><div class="info-value"><span class="status-badge status-{{ staff.status }}">{{ staff.get_status_display }}</span></div></div>
     <div class="info-card"><div class="info-label">Address</div><div class="info-value">{{ staff.address|default:"—" }}</div></div>
     <div class="info-card"><div class="info-label">Notes</div><div class="info-value">{{ staff.notes|default:"—" }}</div></div>
+</div>
+
+<div class="action-panel" style="margin-top:1.5rem;">
+    <div class="info-card">
+        <h3>Account Control</h3>
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:1rem;">
+            <form method="post" action="{% url 'staff_toggle_status' schema_name=tenant.schema_name staff_id=staff.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="status" value="{% if staff.status == 'active' %}inactive{% else %}active{% endif %}">
+                <button type="submit" class="btn-secondary">{% if staff.status == 'active' %}Suspend{% else %}Activate{% endif %}</button>
+            </form>
+            <form method="post" action="{% url 'staff_force_logout' schema_name=tenant.schema_name staff_id=staff.id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn-secondary">Force Logout</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="info-card" style="margin-top:1.5rem;">
+    <h3>Reset Teacher Password</h3>
+    <form method="post" action="{% url 'staff_reset_password' schema_name=tenant.schema_name staff_id=staff.id %}" style="display:grid; gap:0.75rem; margin-top:1rem;">
+        {% csrf_token %}
+        <input type="text" name="cnic" placeholder="CNIC" required>
+        <input type="date" name="date_of_birth" required>
+        <input type="password" name="new_password" placeholder="New password" required>
+        <input type="password" name="confirm_password" placeholder="Confirm new password" required>
+        <button type="submit" class="btn-primary">Reset Password</button>
+    </form>
 </div>
 
 <style>

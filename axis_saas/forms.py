@@ -45,7 +45,7 @@ class StaffForm(forms.ModelForm):
     class Meta:
         from .models import Staff
         model = Staff
-        fields = ['first_name', 'last_name', 'gender', 'date_of_birth', 'email', 'job_title', 'department', 'hire_date', 'status', 'phone', 'address', 'notes']
+        fields = ['first_name', 'last_name', 'gender', 'date_of_birth', 'cnic', 'email', 'job_title', 'department', 'hire_date', 'status', 'phone', 'address', 'notes']
         widgets = {
             'date_of_birth': forms.DateInput(attrs={'type': 'date'}),
             'hire_date': forms.DateInput(attrs={'type': 'date'}),

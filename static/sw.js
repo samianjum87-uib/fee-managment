@@ -194,6 +194,28 @@ self.addEventListener('fetch', event => {
         return;
     }
 
+    const isStaffPortalPage = /^\/portal\/staff\/(dashboard|classes|attendance|profile|notifications|more|login|logout)(\/|$)/.test(url.pathname);
+    if (isStaffPortalPage) {
+        event.respondWith(
+            caches.match(event.request).then(cached => {
+                const fetchPromise = fetch(event.request, { cache: 'reload' })
+                    .then(response => {
+                        if (response.ok) {
+                            caches.open(CACHE_NAME).then(cache => cache.put(event.request, response.clone()));
+                        }
+                        return response;
+                    })
+                    .catch(() => {});
+                if (cached) {
+                    fetchPromise.then(() => {});
+                    return cached;
+                }
+                return fetchPromise;
+            })
+        );
+        return;
+    }
+
     // ---- 4. Static assets (cache-first) ----
     if (url.pathname.startsWith('/static/')) {
         event.respondWith(

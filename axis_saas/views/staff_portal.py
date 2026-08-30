@@ -3,6 +3,7 @@ from datetime import datetime
 
 from django.core.cache import cache
 from django.db import connection
+from django.contrib import messages
 from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -38,8 +39,8 @@ def staff_login(request):
             if credential.check_password(password):
                 from django_tenants.utils import schema_context
                 with schema_context(credential.schema_name):
-                    staff = Staff.objects.filter(pk=credential.staff_id, status='active').first()
-                if staff is None:
+                    staff = Staff.objects.filter(pk=credential.staff_id).first()
+                if staff is None or staff.status != 'active':
                     cache.set(ip_key, attempts + 1, 60)
                     return render(request, 'mobile/staff/login.html', {'error': 'Your staff account is inactive or missing.'})
 
@@ -59,6 +60,15 @@ def staff_login(request):
                 request.session['staff_name'] = staff.full_name
                 request.session.set_expiry(1800)
                 request.session.modified = True
+
+                session_keys = cache.get(f'staff_session_keys:{credential.schema_name}:{staff.pk}', [])
+                if isinstance(session_keys, str):
+                    session_keys = [session_keys]
+                session_keys = [k for k in list(session_keys) if k]
+                if request.session.session_key:
+                    session_keys.append(request.session.session_key)
+                cache.set(f'staff_session_keys:{credential.schema_name}:{staff.pk}', list(dict.fromkeys(session_keys)), 1800)
+                cache.set(f'staff_online:{credential.schema_name}:{staff.pk}', request.session.session_key, 1800)
                 return redirect('staff_dashboard')
 
         cache.set(ip_key, attempts + 1, 60)
@@ -70,6 +80,17 @@ def staff_login(request):
 
 
 def staff_logout(request):
+    staff_id = request.session.get('staff_id')
+    schema_name = request.session.get('staff_schema_name')
+    if staff_id and schema_name:
+        try:
+            from django_tenants.utils import schema_context
+            with schema_context(schema_name):
+                staff = Staff.objects.filter(pk=staff_id).first()
+                if staff:
+                    staff.logout_session()
+        except Exception:
+            pass
     request.session.flush()
     request.session.pop('school_admin_authenticated', None)
     request.session.pop('school_admin_schema', None)
@@ -200,7 +221,7 @@ def staff_profile(request):
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=staff.pk, schema_name=schema_name).first()
     if credential is not None:
-        credential.raw_password = getattr(staff, '_generated_password', None) or getattr(credential, 'raw_password', None)
+        credential.raw_password = None
     return render(request, 'mobile/staff/profile.html', {'staff': staff, 'credential': credential})
 
 
@@ -212,17 +233,50 @@ def staff_change_password(request):
     old_password = request.POST.get('old_password')
     new_password = request.POST.get('new_password')
     confirm_password = request.POST.get('confirm_password')
+    cnic = (request.POST.get('cnic') or '').strip()
+    dob = request.POST.get('date_of_birth')
+
+    with schema_context(schema_name):
+        staff = Staff.objects.filter(pk=request.session['staff_id']).first()
+        if staff is None:
+            return JsonResponse({'success': False, 'message': 'Staff account not found.'}, status=404) if request.headers.get('x-requested-with') == 'XMLHttpRequest' else redirect('staff_profile_page')
+        if staff.status != 'active':
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'This account is suspended and cannot change password.'}, status=403)
+            messages.error(request, 'This account is suspended and cannot change password.')
+            return redirect('staff_profile_page')
+
+        cnic_ok = bool(staff.cnic) and str(staff.cnic).replace('-', '').replace(' ', '').lower() == str(cnic).replace('-', '').replace(' ', '').lower()
+        dob_ok = bool(staff.date_of_birth) and staff.date_of_birth.isoformat() == str(dob)
+        if not cnic_ok or not dob_ok:
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'Your CNIC and date of birth do not match the staff record.'}, status=400)
+            messages.error(request, 'Your CNIC and date of birth do not match the staff record.')
+            return redirect('staff_profile_page')
+
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=request.session['staff_id'], schema_name=schema_name).first()
         if not credential or not credential.check_password(old_password):
-            return JsonResponse({'success': False, 'message': 'Current password is incorrect.'}, status=400)
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'Current password is incorrect.'}, status=400)
+            messages.error(request, 'Current password is incorrect.')
+            return redirect('staff_profile_page')
         if new_password != confirm_password:
-            return JsonResponse({'success': False, 'message': 'New passwords do not match.'}, status=400)
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'New passwords do not match.'}, status=400)
+            messages.error(request, 'New passwords do not match.')
+            return redirect('staff_profile_page')
         if len(new_password) < 12 or not any(ch.isupper() for ch in new_password) or not any(ch.isdigit() for ch in new_password) or not any(ch in '!@#$%^&*' for ch in new_password):
-            return JsonResponse({'success': False, 'message': 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.'}, status=400)
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.'}, status=400)
+            messages.error(request, 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.')
+            return redirect('staff_profile_page')
         credential.set_password(new_password)
         credential.save(update_fields=['password'])
-        return JsonResponse({'success': True, 'message': 'Password updated successfully.'})
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return JsonResponse({'success': True, 'message': 'Password updated successfully.'})
+        messages.success(request, 'Password updated successfully.')
+        return redirect('staff_profile_page')
 
 
 @require_staff_login

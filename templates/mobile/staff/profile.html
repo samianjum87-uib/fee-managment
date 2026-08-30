@@ -20,10 +20,7 @@
         </div>
         <div>
             <div class="subtle" style="font-size:12px; margin-bottom:4px;">Password</div>
-            <div class="password-row">
-                <input id="staffPasswordField" type="password" value="{{ credential.raw_password|default:'********' }}" readonly>
-                <button type="button" class="toggle-eye" data-target="staffPasswordField" aria-label="Show or hide staff password">Show</button>
-            </div>
+            <div style="padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:#f8fafc; color:var(--muted);">Hidden for security. Use the change password form below.</div>
         </div>
     </div>
 </div>
@@ -32,6 +29,8 @@
     <h3>Change Password</h3>
     <form method="post" action="{% url 'staff_change_password' %}" class="stack">
         {% csrf_token %}
+        <input type="text" name="cnic" placeholder="CNIC" required>
+        <input type="date" name="date_of_birth" required>
         <input type="password" name="old_password" placeholder="Current password" required>
         <input type="password" name="new_password" placeholder="New password" required>
         <input type="password" name="confirm_password" placeholder="Confirm new password" required>
