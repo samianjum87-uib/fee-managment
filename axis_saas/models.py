@@ -662,18 +662,24 @@ class Staff(models.Model):
 
     def logout_session(self):
         from django.core.cache import cache
-        from django.contrib.sessions.backends.db import SessionStore
         from django.db import connection
+        from django_tenants.utils import schema_context
+
+        from axis_saas.session_backend import SessionStore
+
         schema_name = getattr(connection, 'schema_name', None) or 'public'
         keys = cache.get(f'staff_session_keys:{schema_name}:{self.pk}', [])
         if isinstance(keys, str):
             keys = [keys]
+
         for key in list(keys):
             try:
-                session = SessionStore(session_key=key)
-                session.flush()
+                with schema_context('public'):
+                    session = SessionStore(session_key=key)
+                    session.flush()
             except Exception:
                 pass
+
         cache.delete(f'staff_online:{schema_name}:{self.pk}')
         cache.delete(f'staff_session_keys:{schema_name}:{self.pk}')
 

@@ -94,6 +94,7 @@ def staff_logout(request):
     request.session.flush()
     request.session.pop('school_admin_authenticated', None)
     request.session.pop('school_admin_schema', None)
+    request.session.modified = True
     return redirect('staff_login')
 
 
