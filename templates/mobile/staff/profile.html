@@ -51,6 +51,127 @@
     </form>
 </div>
 <script>
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return '';
+    }
+
+    function base64UrlToUint8Array(value) {
+        const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+        const binary = atob(normalized + pad);
+        return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    }
+
+    function uint8ArrayToBase64Url(value) {
+        let binary = '';
+        value.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+        });
+        return btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/g, '');
+    }
+
+    function displayPasskeyStatus(message, isError = false) {
+        const statusEl = document.getElementById('passkey-status');
+        if (!statusEl) return;
+        statusEl.textContent = message;
+        statusEl.style.color = isError ? '#b91c1c' : '#475569';
+    }
+
+    async function registerPasskey() {
+        const button = document.getElementById('register-passkey-btn');
+        if (!button) return;
+
+        if (!window.PublicKeyCredential) {
+            displayPasskeyStatus('This browser does not support native WebAuthn passkeys. Use Chrome, Edge, Safari, or Firefox on a secure device.', true);
+            return;
+        }
+
+        button.disabled = true;
+        button.textContent = 'Registering…';
+        displayPasskeyStatus('Preparing secure passkey registration…');
+
+        try {
+            const csrfToken = getCookie('csrftoken');
+            const response = await fetch('{% url "staff_webauthn_registration_options" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({})
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ error: 'Unable to prepare passkey registration.' }));
+                throw new Error(error.error || 'Unable to prepare passkey registration.');
+            }
+
+            const options = await response.json();
+            const publicKey = {
+                challenge: base64UrlToUint8Array(options.challenge),
+                rp: options.rp,
+                user: {
+                    ...options.user,
+                    id: base64UrlToUint8Array(options.user.id)
+                },
+                pubKeyCredParams: options.pubKeyCredParams,
+                authenticatorSelection: options.authenticatorSelection || { userVerification: 'preferred', residentKey: 'required' },
+                timeout: options.timeout,
+                attestation: options.attestation || 'none',
+                excludeCredentials: (options.excludeCredentials || []).map((item) => ({
+                    ...item,
+                    id: base64UrlToUint8Array(item.id)
+                }))
+            };
+
+            const credential = await navigator.credentials.create({ publicKey });
+            const payload = {
+                id: credential.id,
+                rawId: uint8ArrayToBase64Url(new Uint8Array(credential.rawId)),
+                type: credential.type,
+                response: {
+                    clientDataJSON: uint8ArrayToBase64Url(new Uint8Array(credential.response.clientDataJSON)),
+                    attestationObject: uint8ArrayToBase64Url(new Uint8Array(credential.response.attestationObject)),
+                    transports: credential.response.getTransports ? credential.response.getTransports() : [],
+                },
+                clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
+                deviceName: 'Browser Passkey'
+            };
+
+            const verifyResponse = await fetch('{% url "staff_webauthn_registration_verify" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const verifyData = await verifyResponse.json();
+            if (!verifyResponse.ok || verifyData.success === false) {
+                throw new Error(verifyData.message || 'Passkey registration failed.');
+            }
+
+            displayPasskeyStatus('Passkey registered successfully.');
+            button.textContent = 'Registered';
+        } catch (error) {
+            displayPasskeyStatus(error.message || 'Unable to register passkey on this browser.', true);
+            button.textContent = 'Register Passkey';
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    document.getElementById('register-passkey-btn')?.addEventListener('click', registerPasskey);
+
     document.querySelectorAll('.toggle-eye').forEach(function(button) {
         button.addEventListener('click', function () {
             const target = document.getElementById(button.dataset.target);

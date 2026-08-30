@@ -7,6 +7,9 @@
     {% if error %}
         <div class="alert" style="color: #991b1b; background: rgba(220,38,38,.08);">{{ error }}</div>
     {% endif %}
+    {% if pending_passkey %}
+        <div id="passkey-login-status" class="alert" style="color: #1d4ed8; background: rgba(59,130,246,.08);">Your password was accepted. Completing secure passkey verification…</div>
+    {% endif %}
     <form method="post" style="display: grid; gap: 12px;">
         {% csrf_token %}
         <div>
@@ -23,4 +26,113 @@
         Secure access is enforced with device-bound passkeys using FIDO2/WebAuthn and requires the browser to support platform or security-key authenticators.
     </div>
 </div>
+<script>
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return '';
+    }
+
+    function base64UrlToUint8Array(value) {
+        const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+        const binary = atob(normalized + pad);
+        return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    }
+
+    function uint8ArrayToBase64Url(value) {
+        let binary = '';
+        value.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+        });
+        return btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/g, '');
+    }
+
+    async function completePendingPasskeyLogin() {
+        if (!window.PublicKeyCredential) {
+            const status = document.getElementById('passkey-login-status');
+            if (status) status.textContent = 'This browser does not support WebAuthn passkeys. Use Chrome, Edge, Safari, or Firefox on a secure device.';
+            return;
+        }
+
+        const status = document.getElementById('passkey-login-status');
+        if (!status) return;
+
+        try {
+            const csrfToken = getCookie('csrftoken');
+            const optionsResponse = await fetch('{% url "staff_webauthn_authentication_options" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({})
+            });
+
+            if (!optionsResponse.ok) {
+                const error = await optionsResponse.json().catch(() => ({ error: 'Passkey authentication unavailable.' }));
+                throw new Error(error.error || 'Passkey authentication unavailable.');
+            }
+
+            const options = await optionsResponse.json();
+            const publicKey = {
+                challenge: base64UrlToUint8Array(options.challenge),
+                timeout: options.timeout,
+                allowCredentials: (options.allowCredentials || []).map((item) => ({
+                    ...item,
+                    id: base64UrlToUint8Array(item.id)
+                })),
+                userVerification: options.userVerification || 'preferred'
+            };
+
+            const credential = await navigator.credentials.get({ publicKey });
+            const payload = {
+                id: credential.id,
+                rawId: uint8ArrayToBase64Url(new Uint8Array(credential.rawId)),
+                type: credential.type,
+                response: {
+                    authenticatorData: uint8ArrayToBase64Url(new Uint8Array(credential.response.authenticatorData)),
+                    clientDataJSON: uint8ArrayToBase64Url(new Uint8Array(credential.response.clientDataJSON)),
+                    signature: uint8ArrayToBase64Url(new Uint8Array(credential.response.signature)),
+                    userHandle: credential.response.userHandle ? uint8ArrayToBase64Url(new Uint8Array(credential.response.userHandle)) : null,
+                },
+                clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {}
+            };
+
+            const verifyResponse = await fetch('{% url "staff_webauthn_authentication_verify" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const verifyData = await verifyResponse.json();
+            if (!verifyResponse.ok || verifyData.success === false) {
+                throw new Error(verifyData.message || 'Passkey verification failed.');
+            }
+
+            if (verifyData.redirect) {
+                window.location.href = verifyData.redirect;
+                return;
+            }
+
+            status.textContent = verifyData.message || 'Passkey verified successfully.';
+        } catch (error) {
+            status.textContent = error.message || 'Passkey verification could not be completed.';
+            status.style.color = '#b91c1c';
+        }
+    }
+
+    {% if pending_passkey %}
+    completePendingPasskeyLogin();
+    {% endif %}
+</script>
 {% endblock %}
