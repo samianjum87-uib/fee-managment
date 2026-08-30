@@ -16,7 +16,7 @@ from django.views.decorators.http import require_http_methods
 from django_tenants.utils import schema_context
 from webauthn import generate_authentication_options, generate_registration_options, verify_authentication_response, verify_registration_response
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_json
-from webauthn.helpers.structs import AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, UserVerificationRequirement
+from webauthn.helpers.structs import AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, ResidentKeyRequirement, UserVerificationRequirement
 
 from axis_saas.models import Notification, SchoolClass, Staff, StaffCredential, Student, StudentAttendance, WebAuthnCredential
 
@@ -310,7 +310,10 @@ def staff_webauthn_registration_options(request):
             user_display_name=credential.username,
             challenge=challenge,
             timeout=60000,
-            authenticator_selection=AuthenticatorSelectionCriteria(user_verification='preferred', resident_key='required'),
+            authenticator_selection=AuthenticatorSelectionCriteria(
+                user_verification=UserVerificationRequirement.PREFERRED,
+                resident_key=ResidentKeyRequirement.REQUIRED,
+            ),
         )
         return JsonResponse(json.loads(options_to_json(registration_options)))
 
