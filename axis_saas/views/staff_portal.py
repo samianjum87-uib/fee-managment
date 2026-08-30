@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import datetime
 
 from django.core.cache import cache
@@ -58,6 +59,7 @@ def staff_login(request):
                 request.session['staff_username'] = credential.username
                 request.session['staff_role'] = staff.role
                 request.session['staff_name'] = staff.full_name
+                request.session['staff_session_token'] = uuid.uuid4().hex
                 request.session.set_expiry(1800)
                 request.session.modified = True
 
@@ -69,6 +71,7 @@ def staff_login(request):
                     session_keys.append(request.session.session_key)
                 cache.set(f'staff_session_keys:{credential.schema_name}:{staff.pk}', list(dict.fromkeys(session_keys)), 1800)
                 cache.set(f'staff_online:{credential.schema_name}:{staff.pk}', request.session.session_key, 1800)
+                cache.set(f'staff_session_token:{credential.schema_name}:{staff.pk}', request.session['staff_session_token'], 1800)
                 return redirect('staff_dashboard')
 
         cache.set(ip_key, attempts + 1, 60)
@@ -94,6 +97,7 @@ def staff_logout(request):
     request.session.flush()
     request.session.pop('school_admin_authenticated', None)
     request.session.pop('school_admin_schema', None)
+    request.session.pop('staff_session_token', None)
     request.session.modified = True
     return redirect('staff_login')
 

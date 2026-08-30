@@ -680,6 +680,7 @@ class Staff(models.Model):
             except Exception:
                 pass
 
+        cache.set(f'staff_session_token:{schema_name}:{self.pk}', 'logged_out', 300)
         cache.delete(f'staff_online:{schema_name}:{self.pk}')
         cache.delete(f'staff_session_keys:{schema_name}:{self.pk}')
 

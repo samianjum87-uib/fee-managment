@@ -26,6 +26,18 @@ class StaffTenantMiddleware:
             request.session.flush()
             return redirect('staff_login')
 
+        session_token = request.session.get('staff_session_token')
+        cached_token = None
+        try:
+            from django.core.cache import cache
+            cached_token = cache.get(f'staff_session_token:{schema_name}:{staff_id}')
+        except Exception:
+            cached_token = None
+
+        if not session_token or cached_token in [None, 'logged_out'] or cached_token != session_token:
+            request.session.flush()
+            return redirect('staff_login')
+
         TenantModel = get_tenant_model()
         try:
             tenant = TenantModel.objects.get(schema_name=schema_name)
