@@ -246,7 +246,7 @@ def staff_reset_password(request, schema_name, staff_id):
             messages.error(request, 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.')
             return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
         credential.set_password(new_password)
-        credential.save(update_fields=['password'])
+        credential.save(update_fields=['password', 'visible_password'])
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'success': True, 'message': 'Password reset successfully.'})
         messages.success(request, 'Password reset successfully.')
