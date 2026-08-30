@@ -8,3 +8,4 @@ django-environ==0.11.2
 Pillow==11.0.0
 redis
 django-redis
+pyotp==2.9.0

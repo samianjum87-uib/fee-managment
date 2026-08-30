@@ -12,6 +12,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
+from django_tenants.utils import schema_context
 
 from axis_saas.models import Notification, SchoolClass, Staff, StaffCredential, Student, StudentAttendance
 
@@ -68,8 +69,10 @@ def staff_login(request):
                     request.session.modified = True
                     return render(request, 'mobile/staff/login_2fa.html', {
                         'staff': staff,
-                        'method': credential.two_factor_method,
-                        'method_label': dict(StaffCredential.TWO_FACTOR_CHOICES).get(credential.two_factor_method, 'Biometric verification'),
+'method': credential.two_factor_method or 'authenticator',
+                    'method_label': dict(StaffCredential.TWO_FACTOR_CHOICES).get(credential.two_factor_method or 'authenticator', 'Authenticator app'),
+                        'issuer_name': 'AXIS School Portal',
+                        'otp_uri': credential.get_authenticator_uri('AXIS School Portal'),
                     })
 
                 request.session.flush()
@@ -131,9 +134,27 @@ def require_staff_login(view_func):
         staff_id = request.session.get('staff_id')
         session_token = request.session.get('staff_session_token')
         cached_token = cache.get(f'staff_session_token:{schema_name}:{staff_id}') if schema_name and staff_id else None
-        if not session_token or cached_token in [None, 'logged_out'] or cached_token != session_token:
+        is_2fa_submission = request.path_info == '/portal/staff/security/submit-2fa/'
+        is_pending_2fa = request.session.get('staff_2fa_pending') is True
+        token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
+        if token_invalid and not (is_2fa_submission and is_pending_2fa and session_token):
             request.session.flush()
             return redirect('staff_login')
+        onboarding_paths = {
+            '/portal/staff/profile/',
+            '/portal/staff/security/toggle-2fa/',
+            '/portal/staff/security/submit-2fa/',
+            '/portal/staff/logout/',
+        }
+        if request.path_info not in onboarding_paths:
+            with schema_context('public'):
+                credential = StaffCredential.objects.filter(
+                    staff_id=staff_id,
+                    schema_name=schema_name,
+                ).first()
+            if credential is None or not credential.two_factor_enabled:
+                messages.warning(request, 'Enable 2-step verification from your profile before using the staff portal.')
+                return redirect('staff_profile_page')
         return view_func(request, *args, **kwargs)
     return wrapped
 
@@ -267,14 +288,16 @@ def staff_submit_2fa(request):
         return JsonResponse({'success': False, 'message': 'Verification required.'}, status=403)
 
     method = request.POST.get('method')
-    token = request.POST.get('token') or ''
-    if method not in ['face', 'fingerprint', 'both']:
-        return JsonResponse({'success': False, 'message': 'Biometric method is invalid.'}, status=400)
+    verification_code = request.POST.get('verification_code') or ''
+    if method not in ['authenticator', 'face', 'fingerprint', 'both']:
+        return JsonResponse({'success': False, 'message': '2-step verification method is invalid.'}, status=400)
 
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
         if credential is None or not credential.two_factor_enabled:
             return JsonResponse({'success': False, 'message': 'Two-factor authentication is not enabled.'}, status=403)
+        if not credential.verify_two_factor_code(verification_code):
+            return JsonResponse({'success': False, 'message': 'The verification code is incorrect or expired. Try again.'}, status=400)
 
     session_token = uuid.uuid4().hex
     request.session['staff_2fa_pending'] = False
@@ -288,26 +311,42 @@ def staff_submit_2fa(request):
 @require_staff_login
 @require_http_methods(['POST'])
 def staff_toggle_2fa(request):
+    from django_tenants.utils import schema_context
+
     schema_name = request.session['staff_schema_name']
     action = request.POST.get('action', 'enable')
-    method = request.POST.get('method', 'face')
-    user_id = request.POST.get('user_id')
+    method = request.POST.get('method', 'authenticator')
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=request.session['staff_id'], schema_name=schema_name).first()
         if credential is None:
             return JsonResponse({'success': False, 'message': 'Staff credential not found.'}, status=404)
         if action == 'enable':
-            if method not in ['face', 'fingerprint', 'both']:
-                return JsonResponse({'success': False, 'message': 'Invalid method selected.'}, status=400)
+            if method not in ['authenticator', 'face', 'fingerprint', 'both']:
+                method = 'authenticator'
             credential.enable_two_factor(method)
-            return JsonResponse({'success': True, 'message': 'Two-factor authentication enabled.', 'method': method})
+            response = JsonResponse({'success': True, 'message': 'Two-factor authentication enabled.', 'method': method})
+            if request.headers.get('x-requested-with') != 'XMLHttpRequest':
+                messages.success(request, '2-step verification enabled. Use an authenticator app to approve each sign-in.')
+                return redirect('staff_profile_page')
+            return response
         if action == 'disable':
             credential.disable_two_factor()
-            return JsonResponse({'success': True, 'message': 'Two-factor authentication disabled.'})
+            response = JsonResponse({'success': True, 'message': 'Two-factor authentication disabled.'})
+            if request.headers.get('x-requested-with') != 'XMLHttpRequest':
+                messages.warning(request, '2-step verification disabled.')
+                return redirect('staff_profile_page')
+            return response
         if action == 'reset':
-            credential.disable_two_factor()
-            credential.enable_two_factor(method)
-            return JsonResponse({'success': True, 'message': 'Two-factor authentication reset successfully.', 'method': method})
+            credential.generate_two_factor_secret()
+            credential.two_factor_enabled = True
+            credential.two_factor_method = 'authenticator'
+            credential.two_factor_last_verified = timezone.now()
+            credential.save(update_fields=['two_factor_enabled', 'two_factor_secret', 'two_factor_method', 'two_factor_last_verified'])
+            response = JsonResponse({'success': True, 'message': 'Authenticator reset successfully.', 'method': 'authenticator'})
+            if request.headers.get('x-requested-with') != 'XMLHttpRequest':
+                messages.success(request, 'Authenticator reset successfully. Scan the new QR code and verify the code.')
+                return redirect('staff_profile_page')
+            return response
     return JsonResponse({'success': False, 'message': 'Unknown action.'}, status=400)
 
 

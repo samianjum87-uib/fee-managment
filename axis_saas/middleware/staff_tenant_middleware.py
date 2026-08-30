@@ -34,7 +34,10 @@ class StaffTenantMiddleware:
         except Exception:
             cached_token = None
 
-        if not session_token or cached_token in [None, 'logged_out'] or cached_token != session_token:
+        is_2fa_submission = request.path_info == '/portal/staff/security/submit-2fa/'
+        is_pending_2fa = request.session.get('staff_2fa_pending') is True
+        token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
+        if token_invalid and not (is_2fa_submission and is_pending_2fa and session_token):
             request.session.flush()
             return redirect('staff_login')
 
@@ -56,5 +59,16 @@ class StaffTenantMiddleware:
         if request.staff is None:
             request.session.flush()
             return redirect('staff_login')
+
+        try:
+            from axis_saas.models import StaffCredential
+            with schema_context('public'):
+                credential = StaffCredential.objects.filter(
+                    staff_id=staff_id,
+                    schema_name=schema_name,
+                ).first()
+            request.staff_2fa_required = credential is None or not credential.two_factor_enabled
+        except Exception:
+            request.staff_2fa_required = False
 
         return self.get_response(request)

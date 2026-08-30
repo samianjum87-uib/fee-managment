@@ -27,19 +27,21 @@
 {% endif %}
 <div class="card">
     <h3>Security & 2-Step Auth</h3>
+    {% if not two_factor_enabled %}
+    <div class="alert security-alert">
+        <strong>Required before portal access</strong>
+        <div>Set up a real authenticator app below. This is the secured 2-step verification standard used by professional systems. Do not rely on a browser-only fake biometric prompt.</div>
+    </div>
+    {% endif %}
     <div class="stack">
         <div class="subtle" style="font-size:12px; text-transform: uppercase; letter-spacing: 0.06em;">Current status</div>
-        <div style="font-weight:700;">{% if two_factor_enabled %}Enabled · {{ two_factor_method|title }}{% else %}Disabled{% endif %}</div>
+        <div style="font-weight:700;">{% if two_factor_enabled %}Enabled · Authenticator App{% else %}Disabled{% endif %}</div>
         <div class="stack" style="margin-top:8px;">
             <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="enable">
-                <select name="method">
-                    <option value="face">Face Lock</option>
-                    <option value="fingerprint">Fingerprint</option>
-                    <option value="both">Face + Fingerprint</option>
-                </select>
-                <button type="submit" class="btn-primary">Enable 2-Step</button>
+                <input type="hidden" name="method" value="authenticator">
+                <button type="submit" class="btn-primary">Enable Authenticator</button>
             </form>
             <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
                 {% csrf_token %}
@@ -49,12 +51,8 @@
             <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="reset">
-                <select name="method">
-                    <option value="face">Reset to Face Lock</option>
-                    <option value="fingerprint">Reset to Fingerprint</option>
-                    <option value="both">Reset to Face + Fingerprint</option>
-                </select>
-                <button type="submit" class="btn-secondary">Reset Security</button>
+                <input type="hidden" name="method" value="authenticator">
+                <button type="submit" class="btn-secondary">Reset Authenticator</button>
             </form>
         </div>
     </div>

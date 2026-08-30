@@ -1,6 +1,7 @@
 import random
 import string
 
+import pyotp
 from django.utils import timezone
 from django.db import models
 from django_tenants.models import TenantMixin, DomainMixin
@@ -489,9 +490,7 @@ class StaffCredential(models.Model):
     """Authentication record for staff across all public-school tenants."""
     TWO_FACTOR_CHOICES = [
         ('none', 'Disabled'),
-        ('face', 'Face Lock'),
-        ('fingerprint', 'Fingerprint'),
-        ('both', 'Face + Fingerprint'),
+        ('authenticator', 'Authenticator App'),
     ]
 
     username = models.CharField(max_length=150, unique=True)
@@ -501,6 +500,7 @@ class StaffCredential(models.Model):
     schema_name = models.CharField(max_length=63)
     is_active = models.BooleanField(default=True)
     two_factor_enabled = models.BooleanField(default=False)
+    two_factor_secret = models.CharField(max_length=64, blank=True, null=True)
     two_factor_method = models.CharField(max_length=20, choices=TWO_FACTOR_CHOICES, default='none')
     two_factor_last_verified = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -536,19 +536,44 @@ class StaffCredential(models.Model):
         self.visible_password = raw_password
         self.password = make_password(raw_password)
 
-    def enable_two_factor(self, method='face'):
+    def generate_two_factor_secret(self):
+        secret = pyotp.random_base32()
+        self.two_factor_secret = secret
+        self.two_factor_method = 'authenticator'
+        return secret
+
+    def get_authenticator_uri(self, issuer_name='AXIS School Portal'):
+        if not self.two_factor_secret:
+            self.generate_two_factor_secret()
+        return pyotp.TOTP(self.two_factor_secret).provisioning_uri(
+            name=self.username,
+            issuer_name=issuer_name,
+        )
+
+    def verify_two_factor_code(self, code):
+        if not self.two_factor_secret or not code:
+            return False
+        try:
+            return pyotp.TOTP(self.two_factor_secret).verify(str(code).strip(), valid_window=2)
+        except Exception:
+            return False
+
+    def enable_two_factor(self, method='authenticator'):
         if method not in dict(self.TWO_FACTOR_CHOICES):
-            method = 'face'
+            method = 'authenticator'
+        if not self.two_factor_secret:
+            self.generate_two_factor_secret()
         self.two_factor_enabled = True
         self.two_factor_method = method
         self.two_factor_last_verified = timezone.now()
-        self.save(update_fields=['two_factor_enabled', 'two_factor_method', 'two_factor_last_verified'])
+        self.save(update_fields=['two_factor_enabled', 'two_factor_secret', 'two_factor_method', 'two_factor_last_verified'])
 
     def disable_two_factor(self):
         self.two_factor_enabled = False
+        self.two_factor_secret = None
         self.two_factor_method = 'none'
         self.two_factor_last_verified = None
-        self.save(update_fields=['two_factor_enabled', 'two_factor_method', 'two_factor_last_verified'])
+        self.save(update_fields=['two_factor_enabled', 'two_factor_secret', 'two_factor_method', 'two_factor_last_verified'])
 
     def __str__(self):
         return f"{self.username} ({self.schema_name})"

@@ -150,6 +150,18 @@
             border-radius: 12px;
             margin-bottom: 12px;
         }
+        .security-alert {
+            border: 1px solid #f59e0b;
+            border-left-width: 5px;
+            background: #fffbeb;
+            color: #78350f;
+        }
+        .security-alert a {
+            display: inline-block;
+            margin-top: 7px;
+            color: #92400e;
+            font-weight: 800;
+        }
         .stack { display: grid; gap: 12px; }
         .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .stat-grid {
@@ -268,6 +280,13 @@
             {% for message in messages %}
                 <div class="alert">{{ message }}</div>
             {% endfor %}
+        {% endif %}
+        {% if request.staff_2fa_required %}
+            <div class="alert security-alert" role="alert">
+                <strong>Action required: protect your account</strong>
+                <div>Enable 2-step verification before using the staff portal.</div>
+                <a href="{% url 'staff_profile_page' %}">Set up 2-step verification now</a>
+            </div>
         {% endif %}
         {% block body %}{% endblock %}
     </div>
