@@ -38,3 +38,28 @@ class StaffPortalTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.session.get('staff_id'), staff.id)
         self.assertEqual(self.client.session.get('staff_schema_name'), self.tenant.schema_name)
+
+    def test_webauthn_registration_options_require_platform_authenticator(self):
+        with schema_context(self.tenant.schema_name):
+            staff = Staff.objects.create(
+                first_name='Bilal',
+                last_name='Ahmad',
+                email='bilal@example.com',
+                job_title='Accountant',
+                department='support',
+                phone='03009876543',
+                role='class_teacher',
+            )
+
+        credential = StaffCredential.objects.get(staff_id=staff.id, schema_name=self.tenant.schema_name)
+        session = self.client.session
+        session['staff_id'] = staff.id
+        session['staff_schema_name'] = self.tenant.schema_name
+        session.save()
+
+        response = self.client.post('/portal/staff/security/webauthn/register/options/', secure=True)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['authenticatorSelection']['authenticatorAttachment'], 'platform')
+        self.assertEqual(data['authenticatorSelection']['userVerification'], 'required')
+        self.assertIn('rpId', data)

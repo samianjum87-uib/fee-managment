@@ -33,6 +33,17 @@ ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',') if os.environ.get
 if DEBUG:
     ALLOWED_HOSTS += ['127.0.0.1', 'localhost']
 
+WEBAUTHN_RP_ID = os.environ.get('WEBAUTHN_RP_ID', 'localhost')
+WEBAUTHN_ORIGIN = os.environ.get('WEBAUTHN_ORIGIN', 'http://localhost:8000')
+WEBAUTHN_RP_NAME = os.environ.get('WEBAUTHN_RP_NAME', 'AXIS School Portal')
+WEBAUTHN_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('WEBAUTHN_ALLOWED_ORIGINS', WEBAUTHN_ORIGIN).split(',')
+    if origin.strip()
+]
+if WEBAUTHN_ORIGIN not in WEBAUTHN_ALLOWED_ORIGINS:
+    WEBAUTHN_ALLOWED_ORIGINS.insert(0, WEBAUTHN_ORIGIN)
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',

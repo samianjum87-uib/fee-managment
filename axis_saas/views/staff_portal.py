@@ -3,6 +3,7 @@ import secrets
 import uuid
 from datetime import datetime
 
+from django.conf import settings
 from django.contrib.auth.hashers import make_password
 
 from django.core.cache import cache
@@ -16,7 +17,7 @@ from django.views.decorators.http import require_http_methods
 from django_tenants.utils import schema_context
 from webauthn import generate_authentication_options, generate_registration_options, verify_authentication_response, verify_registration_response
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_json
-from webauthn.helpers.structs import AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, ResidentKeyRequirement, UserVerificationRequirement
+from webauthn.helpers.structs import AuthenticatorAttachment, AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, ResidentKeyRequirement, UserVerificationRequirement
 
 from axis_saas.models import Notification, SchoolClass, Staff, StaffCredential, Student, StudentAttendance, WebAuthnCredential
 
@@ -283,8 +284,35 @@ def staff_profile(request):
 
 
 def _staff_compute_rp_id(request):
+    configured_rp_id = getattr(settings, 'WEBAUTHN_RP_ID', '').strip().lower()
+    if configured_rp_id:
+        return configured_rp_id
     host = request.get_host().split(':')[0]
     return host if host and host not in ['', 'localhost', '127.0.0.1'] else 'localhost'
+
+
+def _staff_compute_origin(request):
+    configured_origin = getattr(settings, 'WEBAUTHN_ORIGIN', '').strip().rstrip('/')
+    if configured_origin:
+        return configured_origin
+    return request.build_absolute_uri('/').rstrip('/')
+
+
+def _staff_expected_origins(request):
+    configured_origins = getattr(settings, 'WEBAUTHN_ALLOWED_ORIGINS', [])
+    if isinstance(configured_origins, str):
+        configured_origins = [origin.strip().rstrip('/') for origin in configured_origins.split(',') if origin.strip()]
+    else:
+        configured_origins = [str(origin).strip().rstrip('/') for origin in configured_origins if str(origin).strip()]
+
+    if getattr(settings, 'WEBAUTHN_ORIGIN', '').strip():
+        configured_origins = [origin for origin in configured_origins if origin != getattr(settings, 'WEBAUTHN_ORIGIN', '').strip().rstrip('/')]
+        configured_origins.insert(0, getattr(settings, 'WEBAUTHN_ORIGIN', '').strip().rstrip('/'))
+
+    origin = _staff_compute_origin(request)
+    if origin not in configured_origins:
+        configured_origins.insert(0, origin)
+    return configured_origins
 
 
 @require_staff_login
@@ -304,16 +332,19 @@ def staff_webauthn_registration_options(request):
         request.session['staff_webauthn_registration_challenge'] = bytes_to_base64url(challenge)
         registration_options = generate_registration_options(
             rp_id=_staff_compute_rp_id(request),
-            rp_name='AXIS School Portal',
+            rp_name=getattr(settings, 'WEBAUTHN_RP_NAME', 'AXIS School Portal'),
             user_name=credential.username,
             user_id=user_id,
             user_display_name=credential.username,
             challenge=challenge,
             timeout=60000,
             authenticator_selection=AuthenticatorSelectionCriteria(
-                user_verification=UserVerificationRequirement.PREFERRED,
+                authenticator_attachment=AuthenticatorAttachment.PLATFORM,
+                user_verification=UserVerificationRequirement.REQUIRED,
                 resident_key=ResidentKeyRequirement.PREFERRED,
+                require_resident_key=False,
             ),
+            attestation='none',
         )
         return JsonResponse(json.loads(options_to_json(registration_options)))
 
@@ -340,7 +371,7 @@ def staff_webauthn_registration_verify(request):
             credential=payload,
             expected_challenge=base64url_to_bytes(expected_challenge),
             expected_rp_id=_staff_compute_rp_id(request),
-            expected_origin=[f'https://{request.get_host()}', f'http://{request.get_host()}'],
+            expected_origin=_staff_expected_origins(request),
             require_user_verification=True,
         )
         WebAuthnCredential.objects.update_or_create(
@@ -383,7 +414,7 @@ def staff_webauthn_authentication_options(request):
         challenge=challenge,
         timeout=60000,
         allow_credentials=allow_credentials,
-        user_verification=UserVerificationRequirement.PREFERRED,
+        user_verification=UserVerificationRequirement.REQUIRED,
     )
     return JsonResponse(json.loads(options_to_json(options)))
 
@@ -413,7 +444,7 @@ def staff_webauthn_authentication_verify(request):
             credential=payload,
             expected_challenge=base64url_to_bytes(expected_challenge),
             expected_rp_id=_staff_compute_rp_id(request),
-            expected_origin=[f'https://{request.get_host()}', f'http://{request.get_host()}'],
+            expected_origin=_staff_expected_origins(request),
             credential_public_key=base64url_to_bytes(webauthn_credential.public_key),
             credential_current_sign_count=webauthn_credential.sign_count,
             require_user_verification=True,
