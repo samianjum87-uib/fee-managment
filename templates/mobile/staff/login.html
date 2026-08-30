@@ -52,15 +52,26 @@
             .replace(/=+$/g, '');
     }
 
-    async function completePendingPasskeyLogin() {
-        if (!window.PublicKeyCredential) {
-            const status = document.getElementById('passkey-login-status');
-            if (status) status.textContent = 'This browser does not support WebAuthn passkeys. Use Chrome, Edge, Safari, or Firefox on a secure device.';
-            return;
+    function ensureWebAuthnSupport() {
+        if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.get) {
+            throw new Error('This browser does not support native WebAuthn passkeys. Use Chrome, Edge, or Safari with a compatible device or security key.');
         }
+        if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+            throw new Error('Passkeys require a secure context. Use HTTPS or localhost.');
+        }
+    }
 
+    async function completePendingPasskeyLogin() {
         const status = document.getElementById('passkey-login-status');
         if (!status) return;
+
+        try {
+            ensureWebAuthnSupport();
+        } catch (error) {
+            status.textContent = error.message;
+            status.style.color = '#b91c1c';
+            return;
+        }
 
         try {
             const csrfToken = getCookie('csrftoken');

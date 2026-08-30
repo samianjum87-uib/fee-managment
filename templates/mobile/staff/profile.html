@@ -83,12 +83,25 @@
         statusEl.style.color = isError ? '#b91c1c' : '#475569';
     }
 
+    function ensureWebAuthnSupport() {
+        if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.create) {
+            throw new Error('This browser does not support native WebAuthn passkeys. Use Chrome, Edge, or Safari with a compatible device or security key.');
+        }
+        if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+            throw new Error('Passkeys require a secure context. Use HTTPS or localhost.');
+        }
+    }
+
     async function registerPasskey() {
         const button = document.getElementById('register-passkey-btn');
         if (!button) return;
 
-        if (!window.PublicKeyCredential) {
-            displayPasskeyStatus('This browser does not support native WebAuthn passkeys. Use Chrome, Edge, Safari, or Firefox on a secure device.', true);
+        try {
+            ensureWebAuthnSupport();
+        } catch (error) {
+            displayPasskeyStatus(error.message, true);
+            button.textContent = 'Register Passkey';
+            button.disabled = false;
             return;
         }
 
