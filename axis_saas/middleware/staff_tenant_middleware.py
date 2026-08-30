@@ -34,10 +34,13 @@ class StaffTenantMiddleware:
         except Exception:
             cached_token = None
 
-        is_2fa_submission = request.path_info == '/portal/staff/security/submit-2fa/'
-        is_pending_2fa = request.session.get('staff_2fa_pending') is True
+        is_webauthn_auth = request.path_info in [
+            '/portal/staff/security/webauthn/auth/options/',
+            '/portal/staff/security/webauthn/auth/verify/',
+        ]
+        is_pending_webauthn = request.session.get('staff_pending_webauthn') is True
         token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
-        if token_invalid and not (is_2fa_submission and is_pending_2fa and session_token):
+        if token_invalid and not (is_webauthn_auth and is_pending_webauthn and session_token is None):
             request.session.flush()
             return redirect('staff_login')
 
@@ -67,8 +70,8 @@ class StaffTenantMiddleware:
                     staff_id=staff_id,
                     schema_name=schema_name,
                 ).first()
-            request.staff_2fa_required = credential is None or not credential.two_factor_enabled
+            request.staff_passkey_required = credential is None or not credential.has_passkey
         except Exception:
-            request.staff_2fa_required = False
+            request.staff_passkey_required = False
 
         return self.get_response(request)

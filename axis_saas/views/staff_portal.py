@@ -1,4 +1,5 @@
 import json
+import secrets
 import uuid
 from datetime import datetime
 
@@ -13,8 +14,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django_tenants.utils import schema_context
+from webauthn import generate_authentication_options, generate_registration_options, verify_authentication_response, verify_registration_response
+from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_json
+from webauthn.helpers.structs import AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, UserVerificationRequirement
 
-from axis_saas.models import Notification, SchoolClass, Staff, StaffCredential, Student, StudentAttendance
+from axis_saas.models import Notification, SchoolClass, Staff, StaffCredential, Student, StudentAttendance, WebAuthnCredential
 
 
 def get_client_ip(request):
@@ -41,7 +45,6 @@ def staff_login(request):
         credential = StaffCredential.objects.filter(username=username).first()
         if credential and credential.is_active and (not credential.locked_until or credential.locked_until <= timezone.now()):
             if credential.check_password(password):
-                from django_tenants.utils import schema_context
                 with schema_context(credential.schema_name):
                     staff = Staff.objects.filter(pk=credential.staff_id).first()
                 if staff is None or staff.status != 'active':
@@ -54,27 +57,6 @@ def staff_login(request):
                 credential.last_login = timezone.now()
                 credential.save(update_fields=['last_login', 'failed_attempts', 'locked_until'])
 
-                two_factor_required = getattr(credential, 'two_factor_enabled', False)
-                if two_factor_required:
-                    request.session.flush()
-                    request.session['staff_id'] = staff.pk
-                    request.session['staff_schema_name'] = credential.schema_name
-                    request.session['staff_username'] = credential.username
-                    request.session['staff_role'] = staff.role
-                    request.session['staff_name'] = staff.full_name
-                    request.session['staff_2fa_pending'] = True
-                    request.session['staff_2fa_method'] = credential.two_factor_method
-                    request.session['staff_session_token'] = uuid.uuid4().hex
-                    request.session.set_expiry(1800)
-                    request.session.modified = True
-                    return render(request, 'mobile/staff/login_2fa.html', {
-                        'staff': staff,
-'method': credential.two_factor_method or 'authenticator',
-                    'method_label': dict(StaffCredential.TWO_FACTOR_CHOICES).get(credential.two_factor_method or 'authenticator', 'Authenticator app'),
-                        'issuer_name': 'AXIS School Portal',
-                        'otp_uri': credential.get_authenticator_uri('AXIS School Portal'),
-                    })
-
                 request.session.flush()
                 request.session['school_admin_authenticated'] = False
                 request.session['school_admin_schema'] = ''
@@ -83,6 +65,16 @@ def staff_login(request):
                 request.session['staff_username'] = credential.username
                 request.session['staff_role'] = staff.role
                 request.session['staff_name'] = staff.full_name
+                request.session.set_expiry(1800)
+                request.session.modified = True
+
+                if credential.has_passkey:
+                    request.session['staff_pending_webauthn'] = True
+                    return render(request, 'mobile/staff/login.html', {
+                        'error': 'Password accepted. Complete your passkey verification to continue.',
+                        'pending_passkey': True,
+                    })
+
                 request.session['staff_session_token'] = uuid.uuid4().hex
                 request.session.set_expiry(1800)
                 request.session.modified = True
@@ -134,16 +126,21 @@ def require_staff_login(view_func):
         staff_id = request.session.get('staff_id')
         session_token = request.session.get('staff_session_token')
         cached_token = cache.get(f'staff_session_token:{schema_name}:{staff_id}') if schema_name and staff_id else None
-        is_2fa_submission = request.path_info == '/portal/staff/security/submit-2fa/'
-        is_pending_2fa = request.session.get('staff_2fa_pending') is True
+        is_webauthn_auth = request.path_info in [
+            '/portal/staff/security/webauthn/auth/options/',
+            '/portal/staff/security/webauthn/auth/verify/',
+        ]
+        is_pending_webauthn = request.session.get('staff_pending_webauthn') is True
         token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
-        if token_invalid and not (is_2fa_submission and is_pending_2fa and session_token):
+        if token_invalid and not (is_webauthn_auth and is_pending_webauthn):
             request.session.flush()
             return redirect('staff_login')
         onboarding_paths = {
             '/portal/staff/profile/',
-            '/portal/staff/security/toggle-2fa/',
-            '/portal/staff/security/submit-2fa/',
+            '/portal/staff/security/webauthn/register/options/',
+            '/portal/staff/security/webauthn/register/verify/',
+            '/portal/staff/security/webauthn/auth/options/',
+            '/portal/staff/security/webauthn/auth/verify/',
             '/portal/staff/logout/',
         }
         if request.path_info not in onboarding_paths:
@@ -152,8 +149,8 @@ def require_staff_login(view_func):
                     staff_id=staff_id,
                     schema_name=schema_name,
                 ).first()
-            if credential is None or not credential.two_factor_enabled:
-                messages.warning(request, 'Enable 2-step verification from your profile before using the staff portal.')
+            if credential is None or not credential.has_passkey:
+                messages.warning(request, 'Register a passkey from your profile before using the staff portal.')
                 return redirect('staff_profile_page')
         return view_func(request, *args, **kwargs)
     return wrapped
@@ -274,83 +271,161 @@ def staff_profile(request):
         staff = Staff.objects.get(pk=request.session['staff_id'])
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=staff.pk, schema_name=schema_name).first()
+    passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential).order_by('-last_used', '-created_at')) if credential else []
     if credential is not None:
         credential.raw_password = None
-    return render(request, 'mobile/staff/profile.html', {'staff': staff, 'credential': credential, 'two_factor_enabled': getattr(credential, 'two_factor_enabled', False), 'two_factor_method': getattr(credential, 'two_factor_method', 'none')})
+    return render(request, 'mobile/staff/profile.html', {
+        'staff': staff,
+        'credential': credential,
+        'passkeys': passkeys,
+        'has_passkey': bool(passkeys),
+    })
+
+
+def _staff_compute_rp_id(request):
+    host = request.get_host().split(':')[0]
+    return host if host and host not in ['', 'localhost', '127.0.0.1'] else 'localhost'
+
 
 @require_staff_login
 @require_http_methods(['POST'])
-def staff_submit_2fa(request):
+def staff_webauthn_registration_options(request):
     schema_name = request.session.get('staff_schema_name')
     staff_id = request.session.get('staff_id')
-    pending = request.session.get('staff_2fa_pending')
-    if not schema_name or not staff_id or not pending:
-        return JsonResponse({'success': False, 'message': 'Verification required.'}, status=403)
-
-    method = request.POST.get('method')
-    verification_code = request.POST.get('verification_code') or ''
-    if method not in ['authenticator', 'face', 'fingerprint', 'both']:
-        return JsonResponse({'success': False, 'message': '2-step verification method is invalid.'}, status=400)
+    if not schema_name or not staff_id:
+        return JsonResponse({'error': 'Authentication required.'}, status=401)
 
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
-        if credential is None or not credential.two_factor_enabled:
-            return JsonResponse({'success': False, 'message': 'Two-factor authentication is not enabled.'}, status=403)
-        if not credential.verify_two_factor_code(verification_code):
-            return JsonResponse({'success': False, 'message': 'The verification code is incorrect or expired. Try again.'}, status=400)
+        if not credential:
+            return JsonResponse({'error': 'Staff credential not found.'}, status=404)
+        user_id = f"{credential.staff_id}:{credential.schema_name}".encode('utf-8')
+        challenge = secrets.token_bytes(32)
+        request.session['staff_webauthn_registration_challenge'] = bytes_to_base64url(challenge)
+        registration_options = generate_registration_options(
+            rp_id=_staff_compute_rp_id(request),
+            rp_name='AXIS School Portal',
+            user_name=credential.username,
+            user_id=user_id,
+            user_display_name=credential.username,
+            challenge=challenge,
+            timeout=60000,
+            authenticator_selection=AuthenticatorSelectionCriteria(user_verification='preferred', resident_key='required'),
+        )
+        return JsonResponse(json.loads(options_to_json(registration_options)))
 
-    session_token = uuid.uuid4().hex
-    request.session['staff_2fa_pending'] = False
-    request.session['staff_session_token'] = session_token
-    request.session['school_admin_authenticated'] = False
-    request.session['school_admin_schema'] = ''
-    request.session.modified = True
-    cache.set(f'staff_session_token:{schema_name}:{staff_id}', session_token, 1800)
-    return JsonResponse({'success': True, 'message': 'Verification successful.'})
 
 @require_staff_login
-@require_http_methods(['GET', 'POST'])
-def staff_toggle_2fa(request):
-    from django_tenants.utils import schema_context
+@require_http_methods(['POST'])
+def staff_webauthn_registration_verify(request):
+    schema_name = request.session.get('staff_schema_name')
+    staff_id = request.session.get('staff_id')
+    expected_challenge = request.session.get('staff_webauthn_registration_challenge')
+    if not schema_name or not staff_id or not expected_challenge:
+        return JsonResponse({'success': False, 'message': 'Registration session expired.'}, status=400)
 
-    if request.method == 'GET':
-        return redirect('staff_profile_page')
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'message': 'Invalid registration payload.'}, status=400)
 
-    schema_name = request.session['staff_schema_name']
-    action = request.POST.get('action', 'enable')
-    method = request.POST.get('method', 'authenticator')
     with schema_context('public'):
-        credential = StaffCredential.objects.filter(staff_id=request.session['staff_id'], schema_name=schema_name).first()
+        credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
         if credential is None:
-            return JsonResponse({'success': False, 'message': 'Staff credential not found.'}, status=404)
-        if action == 'enable':
-            if method not in ['authenticator', 'face', 'fingerprint', 'both']:
-                method = 'authenticator'
-            credential.enable_two_factor(method)
-            response = JsonResponse({'success': True, 'message': 'Two-factor authentication enabled.', 'method': method})
-            if request.headers.get('x-requested-with') != 'XMLHttpRequest':
-                messages.success(request, '2-step verification enabled. Use Google Authenticator, Microsoft Authenticator, Authy, or another TOTP app to approve each sign-in.')
-                return redirect('staff_profile_page')
-            return response
-        if action == 'disable':
-            credential.disable_two_factor()
-            response = JsonResponse({'success': True, 'message': 'Two-factor authentication disabled.'})
-            if request.headers.get('x-requested-with') != 'XMLHttpRequest':
-                messages.warning(request, '2-step verification disabled.')
-                return redirect('staff_profile_page')
-            return response
-        if action == 'reset':
-            credential.generate_two_factor_secret()
-            credential.two_factor_enabled = True
-            credential.two_factor_method = 'authenticator'
-            credential.two_factor_last_verified = timezone.now()
-            credential.save(update_fields=['two_factor_enabled', 'two_factor_secret', 'two_factor_method', 'two_factor_last_verified'])
-            response = JsonResponse({'success': True, 'message': 'Authenticator reset successfully.', 'method': 'authenticator'})
-            if request.headers.get('x-requested-with') != 'XMLHttpRequest':
-                messages.success(request, 'Authenticator reset successfully. Scan the new QR code and verify the code.')
-                return redirect('staff_profile_page')
-            return response
-    return JsonResponse({'success': False, 'message': 'Unknown action.'}, status=400)
+            return JsonResponse({'success': False, 'message': 'Credential not found.'}, status=404)
+        verification = verify_registration_response(
+            credential=payload,
+            expected_challenge=base64url_to_bytes(expected_challenge),
+            expected_rp_id=_staff_compute_rp_id(request),
+            expected_origin=[f'https://{request.get_host()}', f'http://{request.get_host()}'],
+            require_user_verification=True,
+        )
+        WebAuthnCredential.objects.update_or_create(
+            credential_id=bytes_to_base64url(verification.credential_id),
+            defaults={
+                'staff_credential': credential,
+                'public_key': bytes_to_base64url(verification.credential_public_key),
+                'sign_count': verification.sign_count,
+                'device_name': payload.get('deviceName', 'Unknown Device'),
+                'is_active': True,
+            },
+        )
+        request.session.pop('staff_webauthn_registration_challenge', None)
+        return JsonResponse({'success': True, 'message': 'Passkey registered successfully.'})
+
+
+@require_http_methods(['POST'])
+def staff_webauthn_authentication_options(request):
+    staff_id = request.session.get('staff_id')
+    schema_name = request.session.get('staff_schema_name')
+    if not staff_id or not schema_name:
+        return JsonResponse({'error': 'Authentication required.'}, status=401)
+
+    with schema_context('public'):
+        credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
+        if credential is None:
+            return JsonResponse({'error': 'Credential not found.'}, status=404)
+        passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
+    if not passkeys:
+        return JsonResponse({'error': 'No passkeys registered for this account.'}, status=403)
+
+    challenge = secrets.token_bytes(32)
+    request.session['staff_webauthn_auth_challenge'] = bytes_to_base64url(challenge)
+    allow_credentials = [
+        PublicKeyCredentialDescriptor(id=base64url_to_bytes(item.credential_id), type='public-key')
+        for item in passkeys
+    ]
+    options = generate_authentication_options(
+        rp_id=_staff_compute_rp_id(request),
+        challenge=challenge,
+        timeout=60000,
+        allow_credentials=allow_credentials,
+        user_verification=UserVerificationRequirement.PREFERRED,
+    )
+    return JsonResponse(json.loads(options_to_json(options)))
+
+
+@require_http_methods(['POST'])
+def staff_webauthn_authentication_verify(request):
+    staff_id = request.session.get('staff_id')
+    schema_name = request.session.get('staff_schema_name')
+    expected_challenge = request.session.get('staff_webauthn_auth_challenge')
+    if not staff_id or not schema_name or not expected_challenge:
+        return JsonResponse({'success': False, 'message': 'Passkey challenge expired. Please sign in again.'}, status=400)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'message': 'Invalid passkey payload.'}, status=400)
+
+    credential_id = payload.get('id')
+    if not credential_id:
+        return JsonResponse({'success': False, 'message': 'Passkey identifier missing.'}, status=400)
+
+    with schema_context('public'):
+        webauthn_credential = WebAuthnCredential.objects.filter(credential_id=credential_id, is_active=True).select_related('staff_credential').first()
+        if webauthn_credential is None:
+            return JsonResponse({'success': False, 'message': 'Passkey not recognized.'}, status=404)
+        verification = verify_authentication_response(
+            credential=payload,
+            expected_challenge=base64url_to_bytes(expected_challenge),
+            expected_rp_id=_staff_compute_rp_id(request),
+            expected_origin=[f'https://{request.get_host()}', f'http://{request.get_host()}'],
+            credential_public_key=base64url_to_bytes(webauthn_credential.public_key),
+            credential_current_sign_count=webauthn_credential.sign_count,
+            require_user_verification=True,
+        )
+        webauthn_credential.sign_count = verification.new_sign_count
+        webauthn_credential.last_used = timezone.now()
+        webauthn_credential.save(update_fields=['sign_count', 'last_used'])
+
+    token = uuid.uuid4().hex
+    request.session['staff_session_token'] = token
+    request.session['staff_pending_webauthn'] = False
+    request.session.modified = True
+    cache.set(f'staff_session_token:{schema_name}:{staff_id}', token, 1800)
+    request.session.pop('staff_webauthn_auth_challenge', None)
+    return JsonResponse({'success': True, 'message': 'Passkey verified successfully.', 'redirect': '/portal/staff/dashboard/'})
 
 
 @require_staff_login
@@ -363,7 +438,6 @@ def staff_change_password(request):
     confirm_password = request.POST.get('confirm_password')
     cnic = (request.POST.get('cnic') or '').strip()
     dob = request.POST.get('date_of_birth')
-    biometric_verified = request.POST.get('biometric_verified') == '1'
 
     with schema_context(schema_name):
         staff = Staff.objects.filter(pk=request.session['staff_id']).first()
@@ -383,11 +457,6 @@ def staff_change_password(request):
                     return JsonResponse({'success': False, 'message': 'Your CNIC and date of birth do not match the staff record.'}, status=400)
                 messages.error(request, 'Your CNIC and date of birth do not match the staff record.')
                 return redirect('staff_profile_page')
-        elif not biometric_verified:
-            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'message': 'Biometric verification is required before changing the password.'}, status=400)
-            messages.error(request, 'Biometric verification is required before changing the password.')
-            return redirect('staff_profile_page')
 
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=request.session['staff_id'], schema_name=schema_name).first()

@@ -17,9 +17,11 @@ from axis_saas.views.staff_portal import (
     staff_more,
     staff_notifications,
     staff_profile,
-    staff_submit_2fa,
     staff_student_profile,
-    staff_toggle_2fa,
+    staff_webauthn_authentication_options,
+    staff_webauthn_authentication_verify,
+    staff_webauthn_registration_options,
+    staff_webauthn_registration_verify,
 )
 
 urlpatterns = [
@@ -34,8 +36,10 @@ urlpatterns = [
     path('students/<int:student_id>/', staff_student_profile, name='staff_student_profile'),
     path('profile/', staff_profile, name='staff_profile_page'),
     path('profile/change-password/', staff_change_password, name='staff_change_password'),
-    path('security/submit-2fa/', staff_submit_2fa, name='staff_submit_2fa'),
-    path('security/toggle-2fa/', staff_toggle_2fa, name='staff_toggle_2fa'),
+    path('security/webauthn/register/options/', staff_webauthn_registration_options, name='staff_webauthn_registration_options'),
+    path('security/webauthn/register/verify/', staff_webauthn_registration_verify, name='staff_webauthn_registration_verify'),
+    path('security/webauthn/auth/options/', staff_webauthn_authentication_options, name='staff_webauthn_authentication_options'),
+    path('security/webauthn/auth/verify/', staff_webauthn_authentication_verify, name='staff_webauthn_authentication_verify'),
     path('notifications/', staff_notifications, name='staff_notifications'),
     path('more/', staff_more, name='staff_more'),
     path('notifications/<int:notif_id>/mark-read/', staff_mark_notification_read, name='staff_mark_notification_read'),

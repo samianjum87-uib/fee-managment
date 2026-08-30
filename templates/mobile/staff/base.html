@@ -281,11 +281,11 @@
                 <div class="alert">{{ message }}</div>
             {% endfor %}
         {% endif %}
-        {% if request.staff_2fa_required %}
+        {% if request.staff_passkey_required %}
             <div class="alert security-alert" role="alert">
-                <strong>Action required: protect your account</strong>
-                <div>Enable 2-step verification before using the staff portal.</div>
-                <a href="{% url 'staff_profile_page' %}">Set up 2-step verification now</a>
+                <strong>Action required: register a passkey</strong>
+                <div>Secure your staff account with a native biometric passkey before continuing to the portal.</div>
+                <a href="{% url 'staff_profile_page' %}">Set up passkey protection now</a>
             </div>
         {% endif %}
         {% block body %}{% endblock %}

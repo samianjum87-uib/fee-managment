@@ -3,7 +3,7 @@
 {% block body %}
 <div class="card" style="max-width: 420px; margin: 42px auto 0;">
     <h2 style="margin: 0 0 8px;">AXIS Staff Portal</h2>
-    <p class="subtle" style="margin-bottom: 18px;">Sign in with your school staff credentials.</p>
+    <p class="subtle" style="margin-bottom: 18px;">Sign in with your school staff credentials and complete passkey verification when prompted.</p>
     {% if error %}
         <div class="alert" style="color: #991b1b; background: rgba(220,38,38,.08);">{{ error }}</div>
     {% endif %}
@@ -19,5 +19,8 @@
         </div>
         <button type="submit" class="btn-primary" style="width:100%; padding: 0.8rem 1rem; border-radius: 0.8rem; font-weight: 600;">Login</button>
     </form>
+    <div class="subtle" style="margin-top: 14px; font-size: 12px;">
+        Secure access is enforced with device-bound passkeys using FIDO2/WebAuthn and requires the browser to support platform or security-key authenticators.
+    </div>
 </div>
 {% endblock %}

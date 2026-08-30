@@ -20,41 +20,20 @@
         </div>
         <div>
             <div class="subtle" style="font-size:12px; margin-bottom:4px;">Password</div>
-            <div style="padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:#f8fafc; color:var(--muted);">Hidden for security. Use the change password form below.</div>
+            <div style="padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:#f8fafc; color:var(--muted);">Hidden for security. Use the secure reset flow through the school admin profile.</div>
         </div>
     </div>
 </div>
 {% endif %}
 <div class="card">
-    <h3>Security & 2-Step Auth</h3>
-    {% if not two_factor_enabled %}
+    <h3>Passkey Security</h3>
     <div class="alert security-alert">
         <strong>Required before portal access</strong>
-        <div>Set up a real authenticator app below. This is the secure 2-step verification standard used by professional systems. Use Google Authenticator, Microsoft Authenticator, Authy, or any TOTP app.</div>
+        <div>Register a native WebAuthn passkey using your device’s biometric or security-key support. This is the production-grade protection used for modern staff portals.</div>
     </div>
-    {% endif %}
-    <div class="stack">
-        <div class="subtle" style="font-size:12px; text-transform: uppercase; letter-spacing: 0.06em;">Current status</div>
-        <div style="font-weight:700;">{% if two_factor_enabled %}Enabled · Authenticator App{% else %}Disabled{% endif %}</div>
-        <div class="stack" style="margin-top:8px;">
-            <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="enable">
-                <input type="hidden" name="method" value="authenticator">
-                <button type="submit" class="btn-primary">Enable Authenticator</button>
-            </form>
-            <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="disable">
-                <button type="submit" class="btn-secondary" style="color: var(--danger);">Disable 2-Step</button>
-            </form>
-            <form method="post" action="{% url 'staff_toggle_2fa' %}" class="stack">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="reset">
-                <input type="hidden" name="method" value="authenticator">
-                <button type="submit" class="btn-secondary">Reset Authenticator</button>
-            </form>
-        </div>
+    <div class="stack" style="margin-top:8px;">
+        <button type="button" class="btn-primary" id="register-passkey-btn">Register Passkey</button>
+        <div id="passkey-status" class="subtle" style="font-size:12px;">No passkey active yet.</div>
     </div>
 </div>
 <div class="card">
