@@ -49,16 +49,21 @@
     <div style="display:grid; gap:0.75rem; margin-top:1rem;">
         <div>
             <div class="info-label">Username</div>
-            <div class="info-value">{{ credential.username }}</div>
+            <div class="info-value">{{ credential.username|default:"—" }}</div>
         </div>
         <div>
             <div class="info-label">Password</div>
             <div class="password-row" style="margin-top:0.4rem; display:flex; gap:0.5rem; align-items:center;">
-                <input id="adminStaffPassword" type="password" value="{{ credential.raw_password|default:'********' }}" readonly style="flex:1;">
-                <button type="button" class="btn-secondary toggle-password" data-target="adminStaffPassword">Show</button>
+                <input id="adminStaffPassword" type="text" value="{{ credential.visible_password|default:credential.raw_password|default:'********' }}" readonly style="flex:1;">
+                <button type="button" class="btn-secondary toggle-password" data-target="adminStaffPassword">Hide</button>
             </div>
         </div>
     </div>
+</div>
+{% else %}
+<div class="info-card" style="margin-top:1.5rem;">
+    <h3>Portal Credentials</h3>
+    <div class="info-value" style="margin-top:0.75rem;">No portal credential found for this staff member.</div>
 </div>
 {% endif %}
 
@@ -83,8 +88,6 @@
     <h3>Reset Teacher Password</h3>
     <form method="post" action="{% url 'staff_reset_password' schema_name=tenant.schema_name staff_id=staff.id %}" style="display:grid; gap:0.75rem; margin-top:1rem;">
         {% csrf_token %}
-        <input type="text" name="cnic" placeholder="CNIC" required>
-        <input type="date" name="date_of_birth" required>
         <input type="password" name="new_password" placeholder="New password" required>
         <input type="password" name="confirm_password" placeholder="Confirm new password" required>
         <button type="submit" class="btn-primary">Reset Password</button>

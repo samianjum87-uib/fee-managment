@@ -149,6 +149,7 @@ def get_staff_profile_context(request, schema_name, staff_id):
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=staff.id, schema_name=schema_name).first()
     if credential is not None:
+        credential.visible_password = credential.visible_password or getattr(credential, 'raw_password', None)
         credential.raw_password = credential.visible_password or getattr(credential, 'raw_password', None)
     return {
         'tenant': tenant,
@@ -198,35 +199,14 @@ def staff_force_logout(request, schema_name, staff_id):
 @require_school_feature('staff_management')
 @require_http_methods(['POST'])
 def staff_reset_password(request, schema_name, staff_id):
-    cnic = (request.POST.get('cnic') or '').strip()
-    dob = request.POST.get('date_of_birth')
     new_password = request.POST.get('new_password')
     confirm_password = request.POST.get('confirm_password')
 
-    if not cnic or not dob or not new_password or not confirm_password:
+    if not new_password or not confirm_password:
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             return JsonResponse({'success': False, 'message': 'All fields are required.'}, status=400)
         messages.error(request, 'All fields are required.')
         return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
-
-    with schema_context(schema_name):
-        staff = get_object_or_404(Staff, id=staff_id)
-        if staff.cnic and str(staff.cnic).replace('-', '').replace(' ', '').lower() != str(cnic).replace('-', '').replace(' ', '').lower():
-            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'message': 'CNIC does not match this staff record.'}, status=400)
-            messages.error(request, 'CNIC does not match this staff record.')
-            return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
-        try:
-            if staff.date_of_birth and staff.date_of_birth.isoformat() != str(dob):
-                if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                    return JsonResponse({'success': False, 'message': 'Date of birth does not match this staff record.'}, status=400)
-                messages.error(request, 'Date of birth does not match this staff record.')
-                return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
-        except Exception:
-            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'message': 'Date of birth must be valid.'}, status=400)
-            messages.error(request, 'Date of birth must be valid.')
-            return redirect('staff_profile', schema_name=schema_name, staff_id=staff_id)
 
     with schema_context('public'):
         credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
