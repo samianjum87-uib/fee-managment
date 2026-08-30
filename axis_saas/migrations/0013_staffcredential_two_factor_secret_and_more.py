@@ -8,11 +8,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name="staffcredential",
-            name="two_factor_secret",
-            field=models.CharField(blank=True, max_length=64, null=True),
-        ),
         migrations.AlterField(
             model_name="staffcredential",
             name="two_factor_method",
