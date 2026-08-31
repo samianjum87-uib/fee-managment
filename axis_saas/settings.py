@@ -33,8 +33,16 @@ ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',') if os.environ.get
 if DEBUG:
     ALLOWED_HOSTS += ['127.0.0.1', 'localhost']
 
-WEBAUTHN_RP_ID = os.environ.get('WEBAUTHN_RP_ID', 'localhost')
-WEBAUTHN_ORIGIN = os.environ.get('WEBAUTHN_ORIGIN', 'http://localhost:8000')
+railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN', '').strip()
+if railway_domain:
+    default_webauthn_origin = f'https://{railway_domain}'
+    default_rp_id = railway_domain
+else:
+    default_webauthn_origin = 'http://localhost:8000'
+    default_rp_id = 'localhost'
+
+WEBAUTHN_RP_ID = os.environ.get('WEBAUTHN_RP_ID', default_rp_id)
+WEBAUTHN_ORIGIN = os.environ.get('WEBAUTHN_ORIGIN', default_webauthn_origin)
 WEBAUTHN_RP_NAME = os.environ.get('WEBAUTHN_RP_NAME', 'AXIS School Portal')
 WEBAUTHN_ALLOWED_ORIGINS = [
     origin.strip()
