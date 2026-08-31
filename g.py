@@ -1,141 +1,75 @@
 #!/usr/bin/env python3
 """
-axis_fixer_final.py - Final fix for staff_portal.py and middleware.
+axis_final_fix.py - Fix UnboundLocalError in staff_tenant_middleware.py.
 
-This script applies known fixes:
-1. Removes duplicate decorators in staff_portal.py.
-2. Ensures no escaped quotes remain.
-3. Adds proper error handling in middleware.
-4. Adds logging to help debug issues.
-
-Run this on your server (or locally and redeploy) to fix the 500 error.
+This script removes the inner import of redirect that shadows the top-level import,
+causing UnboundLocalError when redirect is used before assignment.
 
 Usage:
-    python axis_fixer_final.py [--dry-run] [--verbose] [--target-dir PATH]
+    python axis_final_fix.py [--dry-run] [--verbose] [--target-dir PATH]
 """
 
 import re
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import List, Tuple
 
-# ----------------------------------------------------------------------
-# PATCH DEFINITIONS
-# ----------------------------------------------------------------------
-
-PATCHES: List[Tuple[str, str, str, str]] = []
-
-STAFF_PORTAL = "axis_saas/views/staff_portal.py"
 MIDDLEWARE_FILE = "axis_saas/middleware/staff_tenant_middleware.py"
 
-# 1. Remove duplicate decorators in staff_portal.py
-PATCHES.append((
-    STAFF_PORTAL,
-    r'(@require_staff_login\s+@require_http_methods\(\[\'POST\'\]\)\s*)\s*@require_staff_login\s+@require_http_methods\(\[\'POST\'\]\)',
-    r'\1',
-    "Remove duplicate decorators (registration_verify)"
-))
+# The line we want to remove: the inner import of redirect inside the if block
+INNER_IMPORT = "from django.shortcuts import redirect"
 
-PATCHES.append((
-    STAFF_PORTAL,
-    r'(@require_http_methods\(\[\'POST\'\]\)\s*)\s*@require_http_methods\(\[\'POST\'\]\)',
-    r'\1',
-    "Remove duplicate decorators (authentication endpoints)"
-))
+def fix_middleware(target_dir, dry_run=False, verbose=False):
+    full_path = target_dir / MIDDLEWARE_FILE
+    if not full_path.exists():
+        print(f"Error: {full_path} not found.")
+        return False
 
-# 2. Fix any escaped quotes that might remain
-PATCHES.append((
-    STAFF_PORTAL,
-    r"request\.session\\\['staff_session_token'\\\]",
-    "request.session['staff_session_token']",
-    "Fix escaped quotes in staff_session_token assignment"
-))
+    try:
+        content = full_path.read_text(encoding='utf-8')
+    except Exception as e:
+        print(f"Failed to read {full_path}: {e}")
+        return False
 
-# 3. Add try/except logging in middleware to capture errors
-PATCHES.append((
-    MIDDLEWARE_FILE,
-    r'(# Determine if passkey is required and enforce redirect\s*try:)',
-    r'\1\n            import logging\n            logger = logging.getLogger(__name__)\n            logger.info(f"Middleware: staff_id={staff_id}, schema={schema_name}")\n            logger.info(f"Credential exists: {credential is not None}, has_passkey: {credential.has_passkey if credential else False}")',
-    "Add logging to middleware"
-))
+    if INNER_IMPORT not in content:
+        print(f"Pattern '{INNER_IMPORT}' not found in {full_path}. Already fixed?")
+        return True
 
-# 4. Ensure that request.staff_passkey_required is always set, even on exception
-PATCHES.append((
-    MIDDLEWARE_FILE,
-    r'(except Exception:\s+request\.staff_passkey_required = False)',
-    r'except Exception as e:\n            import logging\n            logger = logging.getLogger(__name__)\n            logger.error(f"Middleware error: {e}")\n            request.staff_passkey_required = False',
-    "Add error logging in middleware exception"
-))
+    new_content = content.replace(INNER_IMPORT, "")
+    # Clean up extra whitespace: remove the line entirely, leaving a blank line.
+    # We'll replace the exact line with nothing, but we need to also handle indentation.
+    # Since it's indented, we can just replace the line with a comment or nothing.
+    # We'll replace the line with nothing but keep the newline? Let's just remove the line.
+    # We'll use regex to remove the line with its indentation.
+    # But simple replace works if we include the newline.
+    pattern = re.compile(r'^(\s*)from django\.shortcuts import redirect\s*$', re.MULTILINE)
+    new_content, count = pattern.subn('', content)
+    if count == 0:
+        print("No replacement made.")
+        return True
 
-# ----------------------------------------------------------------------
-# PATCHER ENGINE
-# ----------------------------------------------------------------------
+    if dry_run:
+        print("Dry run: would write changes to", full_path)
+        if verbose:
+            print("--- Original (first 500 chars)")
+            print(content[:500])
+            print("--- New (first 500 chars)")
+            print(new_content[:500])
+        return True
 
-class Patcher:
-    def __init__(self, target_dir: Path, dry_run: bool = False, verbose: bool = False):
-        self.target_dir = target_dir
-        self.dry_run = dry_run
-        self.verbose = verbose
-        self.logs: List[str] = []
-
-    def log(self, msg: str, level: str = "INFO"):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_line = f"[{timestamp}] {level}: {msg}"
-        self.logs.append(log_line)
-        if self.verbose or level in ("ERROR", "WARNING"):
-            print(log_line)
-
-    def apply_patch(self, file_path: str, search: str, replace: str, desc: str) -> bool:
-        full_path = self.target_dir / file_path
-        if not full_path.exists():
-            self.log(f"File not found: {full_path}", "ERROR")
-            return False
-
-        try:
-            content = full_path.read_text(encoding='utf-8')
-        except Exception as e:
-            self.log(f"Failed to read {full_path}: {e}", "ERROR")
-            return False
-
-        pattern = re.compile(search, re.DOTALL | re.MULTILINE)
-        new_content, count = pattern.subn(replace, content)
-        if count == 0:
-            self.log(f"Pattern not found or no replacement made in {file_path}: {desc}", "WARNING")
-            return False
-
-        if self.dry_run:
-            self.log(f"[DRY RUN] Would patch {file_path}: {desc} ({count} replacements)", "INFO")
-            return True
-
-        try:
-            full_path.write_text(new_content, encoding='utf-8')
-            self.log(f"Patched {file_path}: {desc} ({count} replacements)", "INFO")
-            return True
-        except Exception as e:
-            self.log(f"Failed to write {full_path}: {e}", "ERROR")
-            return False
-
-    def run(self):
-        self.log(f"Starting final patcher with target dir: {self.target_dir}")
-        self.log(f"Dry run: {self.dry_run}, Verbose: {self.verbose}")
-
-        success_count = 0
-        fail_count = 0
-        for file_path, search, replace, desc in PATCHES:
-            if self.apply_patch(file_path, search, replace, desc):
-                success_count += 1
-            else:
-                fail_count += 1
-
-        self.log(f"Patches applied: {success_count} successful, {fail_count} failed.")
-        return success_count > 0
+    try:
+        full_path.write_text(new_content, encoding='utf-8')
+        print("Successfully updated", full_path)
+        print(f"Removed {count} occurrence(s) of inner redirect import.")
+        return True
+    except Exception as e:
+        print(f"Failed to write {full_path}: {e}")
+        return False
 
 
 def main():
     import argparse
-
-    parser = argparse.ArgumentParser(description="Final fixes for Staff Portal 500 error.")
+    parser = argparse.ArgumentParser(description="Fix UnboundLocalError in staff_tenant_middleware.")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying.")
     parser.add_argument("--verbose", action="store_true", help="Show detailed output.")
     parser.add_argument("--target-dir", default=".", help="Project root directory (default: current directory).")
@@ -143,21 +77,12 @@ def main():
 
     target_dir = Path(args.target_dir).resolve()
     if not target_dir.is_dir():
-        print(f"Error: {target_dir} is not a valid directory.", file=sys.stderr)
+        print(f"Error: {target_dir} is not a valid directory.")
         sys.exit(1)
 
-    patcher = Patcher(target_dir, dry_run=args.dry_run, verbose=args.verbose)
-    success = patcher.run()
-
-    if args.dry_run:
-        print("\nDry run completed. No files were modified.")
-    else:
-        if success:
-            print("\nFixes applied successfully. Please restart your server.")
-            print("If the issue persists, check the server logs for the specific error.")
-        else:
-            print("\nSome fixes failed. See logs above.", file=sys.stderr)
-            sys.exit(1)
+    success = fix_middleware(target_dir, dry_run=args.dry_run, verbose=args.verbose)
+    if not success:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

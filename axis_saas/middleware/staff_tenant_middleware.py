@@ -1,5 +1,5 @@
 from django.db import connection
-from django.shortcuts import redirect
+
 from django_tenants.utils import get_tenant_model, schema_context
 
 from axis_saas.models import Staff
@@ -100,7 +100,7 @@ class StaffTenantMiddleware:
                     '/portal/staff/login/',
                 ]
                 if request.path_info not in allowed_paths:
-                    from django.shortcuts import redirect
+
                     return redirect('staff_profile_page')
         except Exception as e:
             import logging
