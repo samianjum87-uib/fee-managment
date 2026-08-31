@@ -69,13 +69,6 @@ def staff_login(request):
                 request.session.set_expiry(1800)
                 request.session.modified = True
 
-                if credential.has_passkey:
-                    request.session['staff_pending_webauthn'] = True
-                    return render(request, 'mobile/staff/login.html', {
-                        'error': 'Password accepted. Complete your passkey verification to continue.',
-                        'pending_passkey': True,
-                    })
-
                 request.session['staff_session_token'] = uuid.uuid4().hex
                 request.session.set_expiry(1800)
                 request.session.modified = True

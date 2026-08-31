@@ -12,8 +12,7 @@
         <div id="passkey-login-status" class="alert" style="color: #1d4ed8; background: rgba(59,130,246,.08);">Your password was accepted. Completing secure passkey verification…</div>
     {% endif %}
     <div style="margin: 0 0 18px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: rgba(59,130,246,.04);">
-        <label for="passkey-username" style="display:block; margin-bottom:6px; font-weight:600;">Passkey Login</label>
-        <input id="passkey-username" type="text" autocomplete="username" placeholder="Optional username (leave blank for passkey-only login)" style="width:100%; padding: 0.8rem 0.9rem; border:1px solid var(--border); border-radius:0.75rem; background: var(--surface); color: var(--text); margin-bottom: 10px;">
+        <div class="subtle" style="margin-bottom: 10px; font-size: 12px;">Passkey login is optional. You can sign in with the device authenticator without entering a username.</div>
         <button type="button" id="passkey-login-btn" class="btn-secondary" style="width:100%; padding: 0.8rem 1rem; border-radius: 0.8rem; font-weight: 600;">Login with Passkey</button>
     </div>
     <form method="post" style="display: grid; gap: 12px;">
@@ -80,7 +79,7 @@
         return data;
     }
 
-    async function loginWithPasskey(username) {
+    async function loginWithPasskey(username = '') {
         const status = document.getElementById('passkey-login-status') || document.createElement('div');
         if (!document.getElementById('passkey-login-status')) {
             status.id = 'passkey-login-status';
@@ -103,6 +102,7 @@
 
         try {
             const csrfToken = getCookie('csrftoken');
+            const payload = username ? { username } : {};
             const optionsResponse = await fetch('{% url "staff_webauthn_authentication_options" %}', {
                 method: 'POST',
                 headers: {
@@ -110,7 +110,7 @@
                     'X-CSRFToken': csrfToken,
                     'X-Requested-With': 'XMLHttpRequest'
                 },
-                body: JSON.stringify({ username: username })
+                body: JSON.stringify(payload)
             });
 
             if (!optionsResponse.ok) {
@@ -171,16 +171,7 @@
     }
 
     document.getElementById('passkey-login-btn')?.addEventListener('click', function () {
-        const username = document.getElementById('passkey-username')?.value.trim();
-        if (!username) {
-            const status = document.getElementById('passkey-login-status');
-            if (status) {
-                status.textContent = 'Enter your username to continue with passkey login.';
-                status.style.color = '#b91c1c';
-            }
-            return;
-        }
-        loginWithPasskey(username);
+        loginWithPasskey('');
     });
 
     async function completePendingPasskeyLogin() {
