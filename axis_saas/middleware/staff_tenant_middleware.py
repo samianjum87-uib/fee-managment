@@ -104,6 +104,7 @@ class StaffTenantMiddleware:
                     return redirect('staff_profile_page')
         except Exception as e:
             import logging
+from django.shortcuts import redirect
             logger = logging.getLogger(__name__)
             logger.error(f"Middleware error: {e}")
             request.staff_passkey_required = False

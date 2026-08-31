@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """
-axis_patcher.py - Fix indentation and import issues in staff_tenant_middleware.py
+axis_patcher.py - Add missing 'redirect' import to staff_tenant_middleware.py
 
-This script corrects:
-1. Adds 'from django.shortcuts import redirect' at the top if missing.
-2. Removes duplicate/incorrect import inside the except block.
-3. Fixes indentation of the except block to avoid IndentationError.
+This script corrects the NameError caused by missing 'redirect' import.
 
 Usage:
     python axis_patcher.py [--dry-run] [--verbose] [--target-dir PATH]
@@ -27,7 +24,7 @@ from datetime import datetime
 # ----------------------------------------------------------------------
 TARGET_FILE = "axis_saas/middleware/staff_tenant_middleware.py"
 IMPORT_LINE = "from django.shortcuts import redirect"
-BROKEN_IMPORT_PATTERN = r'^[ \t]*from django\.shortcuts import redirect\s*$'
+BROKEN_IMPORT_PATTERN = r'^[ \t]*from django\.shortcuts import redirectCredential\s*$'
 
 # ----------------------------------------------------------------------
 # Logging
@@ -51,120 +48,36 @@ def patch_file(file_path, dry_run=False, verbose=False):
 
     original_content = content
     modified = False
-    lines = content.splitlines(keepends=True)
 
-    # Step 1: Ensure the correct import is at the top.
-    # Check if the import already exists anywhere.
-    import_exists = any(re.search(IMPORT_LINE, line) for line in lines)
+    # 1. Remove any broken import lines (if present)
+    new_content, count = re.subn(BROKEN_IMPORT_PATTERN, '', content, flags=re.MULTILINE)
+    if count:
+        log(f"Removed {count} broken import line(s).", verbose)
+        content = new_content
+        modified = True
 
-    if not import_exists:
-        # Find the last import line and insert after it.
-        insert_idx = -1
+    # 2. Ensure the correct import is present at the top.
+    # Check if the import already exists.
+    if re.search(r'^from django\.shortcuts import redirect\s*$', content, re.MULTILINE):
+        log("Correct import already present.", verbose)
+    else:
+        # Insert the import after the last existing import line.
+        lines = content.splitlines(keepends=True)
+        insert_index = -1
         for i, line in enumerate(lines):
             stripped = line.lstrip()
             if stripped.startswith(('import ', 'from ')):
-                insert_idx = i
-        if insert_idx == -1:
-            insert_idx = 0
+                insert_index = i
+        if insert_index == -1:
+            insert_index = 0
         else:
-            insert_idx += 1
-        lines.insert(insert_idx, IMPORT_LINE + '\n')
-        log(f"Inserted '{IMPORT_LINE}' at top.", verbose)
+            insert_index += 1
+        lines.insert(insert_index, IMPORT_LINE + '\n')
+        content = ''.join(lines)
+        log(f"Inserted import at line {insert_index+1}.", verbose)
         modified = True
 
-    # Step 2: Remove the broken import line inside the except block.
-    # We'll find lines that contain the BROKEN_IMPORT_PATTERN and are not indented
-    # or are incorrectly indented. We'll remove them.
-    new_lines = []
-    for line in lines:
-        if re.search(BROKEN_IMPORT_PATTERN, line):
-            # Check if it's inside an except block? We'll remove it regardless,
-            # because the correct import is now at the top.
-            log(f"Removing broken import line: {line.strip()}", verbose)
-            modified = True
-            continue
-        new_lines.append(line)
-    lines = new_lines
-
-    # Step 3: Fix indentation inside the except block.
-    # We need to ensure that lines under 'except Exception as e:' are indented by 4 spaces.
-    # We'll look for the pattern: 'except Exception as e:' and then ensure the following lines
-    # (until the next line with same or lower indentation) are indented by 4 spaces.
-    # We'll use a regex to find the except block and fix indentation.
-    # This is tricky with line-by-line, but we can do a targeted replacement.
-    # We'll search for the except block and correct the indentation of the lines inside.
-    # We'll assume the except block is already present with some indentation issues.
-    # Simpler: we can just replace the entire except block with a properly indented one.
-    # But we need to preserve the content. We'll parse the file to find the except block.
-
-    # Let's use a regex to find the except block and capture its content.
-    # We'll look for the line containing 'except Exception as e:' and then the next few lines.
-    # However, it's easier to read the file line by line, detect when we are inside the except block,
-    # and adjust indentation.
-
-    # We'll rebuild lines with proper indentation.
-    # We'll scan for the start of the except block.
-    block_started = False
-    block_indent = None
-    final_lines = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.lstrip()
-        # Check if this line is the start of the except block.
-        if re.match(r'^except Exception as e:', stripped):
-            # Determine the indentation of this line.
-            indent = len(line) - len(stripped)
-            block_indent = indent
-            block_started = True
-            # Add the except line as is (with its original indentation).
-            final_lines.append(line)
-            i += 1
-            # Now process the following lines until we hit a line with indentation <= block_indent (or end of file).
-            while i < len(lines):
-                next_line = lines[i]
-                next_stripped = next_line.lstrip()
-                # If the line is empty, just keep it.
-                if next_stripped == '':
-                    final_lines.append(next_line)
-                    i += 1
-                    continue
-                # Determine its indentation.
-                next_indent = len(next_line) - len(next_stripped)
-                # If the indentation is less than or equal to the block indent (but not empty), we are out of the block.
-                if next_indent <= block_indent and next_stripped and not next_stripped.startswith(('except', 'finally', 'else')):
-                    # We are out of the except block.
-                    block_started = False
-                    break
-                # Inside the block: ensure it is indented by exactly 4 spaces more than block_indent.
-                # Actually, we want each line inside to be indented with 4 spaces relative to the except line.
-                # So target_indent = block_indent + 4
-                target_indent = block_indent + 4
-                # Remove any leading spaces/tabs and then add target_indent spaces.
-                # We'll preserve tabs? We'll just use spaces for simplicity.
-                # We'll replace the leading whitespace with target_indent spaces.
-                # But we need to be careful with mixed tabs/spaces. We'll assume spaces.
-                # We'll compute the new line: spaces*target_indent + next_stripped.
-                new_line = ' ' * target_indent + next_stripped
-                # If the line is the broken import, we already removed it, so it won't be here.
-                final_lines.append(new_line)
-                log(f"Indented line: {next_stripped.strip()} -> {new_line.strip()}", verbose)
-                modified = True
-                i += 1
-            # After the block, continue with the rest.
-            continue
-        else:
-            # Not inside except block, keep line as is.
-            final_lines.append(line)
-            i += 1
-
-    # If we didn't process any except block (or it's missing), we might still have the broken import removed.
-    # But we already removed it.
-
-    # Step 4: Write back if modified.
-    new_content = ''.join(final_lines)
-
-    if new_content == original_content and not modified:
+    if not modified:
         log("No changes needed.", verbose)
         return True
 
@@ -173,7 +86,7 @@ def patch_file(file_path, dry_run=False, verbose=False):
         import difflib
         diff = difflib.unified_diff(
             original_content.splitlines(keepends=True),
-            new_content.splitlines(keepends=True),
+            content.splitlines(keepends=True),
             fromfile=str(file_path),
             tofile=str(file_path) + " (patched)"
         )
@@ -182,7 +95,7 @@ def patch_file(file_path, dry_run=False, verbose=False):
         return True
 
     with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(new_content)
+        f.write(content)
     log(f"Successfully patched {file_path}", force=True)
     return True
 
@@ -192,7 +105,7 @@ def patch_file(file_path, dry_run=False, verbose=False):
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description="Fix the middleware syntax and indentation errors."
+        description="Fix the middleware import error."
     )
     parser.add_argument('--dry-run', action='store_true',
                         help="Preview changes without writing.")
