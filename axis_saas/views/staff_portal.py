@@ -1,4 +1,5 @@
 import json
+import logging
 import secrets
 import uuid
 from datetime import datetime
@@ -20,6 +21,8 @@ from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_
 from webauthn.helpers.structs import AttestationConveyancePreference, AuthenticatorAttachment, AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, ResidentKeyRequirement, UserVerificationRequirement
 
 from axis_saas.models import Notification, SchoolClass, Staff, StaffCredential, Student, StudentAttendance, WebAuthnCredential
+
+logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request):
@@ -340,6 +343,7 @@ def staff_webauthn_registration_options(request):
 @require_staff_login
 @require_http_methods(['POST'])
 def staff_webauthn_registration_verify(request):
+    logger.info(f"Registration verify called for staff {request.session.get('staff_id')}")
     schema_name = request.session.get('staff_schema_name')
     staff_id = request.session.get('staff_id')
     expected_challenge = request.session.get('staff_webauthn_registration_challenge')
@@ -362,6 +366,7 @@ def staff_webauthn_registration_verify(request):
             expected_origin=_staff_expected_origins(request),
             require_user_verification=True,
         )
+        logger.info(f"WebAuthn registration verification succeeded for credential_id={bytes_to_base64url(verification.credential_id)}")
         WebAuthnCredential.objects.update_or_create(
             credential_id=bytes_to_base64url(verification.credential_id),
             defaults={
@@ -373,6 +378,7 @@ def staff_webauthn_registration_verify(request):
             },
         )
         request.session.pop('staff_webauthn_registration_challenge', None)
+        logger.info('Registration success, returning success response')
         return JsonResponse({'success': True, 'message': 'Passkey registered successfully.'})
 
 
@@ -436,6 +442,7 @@ def staff_webauthn_authentication_options(request):
 
 @require_http_methods(['POST'])
 def staff_webauthn_authentication_verify(request):
+    logger.info(f"Authentication verify called for credential {request.session.get('staff_username')}")
     expected_challenge = request.session.get('staff_webauthn_auth_challenge')
     login_username = request.session.get('staff_webauthn_login_username')
     login_staff_id = request.session.get('staff_webauthn_login_staff_id')
@@ -509,6 +516,7 @@ def staff_webauthn_authentication_verify(request):
     request.session.pop('staff_webauthn_login_username', None)
     request.session.pop('staff_webauthn_login_staff_id', None)
     request.session.pop('staff_webauthn_login_schema_name', None)
+    logger.info('Authentication success, returning redirect')
     return JsonResponse({'success': True, 'message': 'Passkey verified successfully.', 'redirect': '/portal/staff/dashboard/'})
 
 

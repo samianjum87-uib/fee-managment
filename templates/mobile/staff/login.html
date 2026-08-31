@@ -80,6 +80,7 @@
     }
 
     async function loginWithPasskey(username = '') {
+        console.log('loginWithPasskey called with username:', username);
         const status = document.getElementById('passkey-login-status') || document.createElement('div');
         if (!document.getElementById('passkey-login-status')) {
             status.id = 'passkey-login-status';
@@ -102,6 +103,13 @@
 
         try {
             const csrfToken = getCookie('csrftoken');
+            if (!csrfToken) {
+                // Fallback to template variable
+                const metaCsrf = document.querySelector('meta[name=\"csrf-token\"]');
+                if (metaCsrf) {
+                    csrfToken = metaCsrf.getAttribute('content');
+                }
+            }
             const payload = username ? { username } : {};
             const optionsResponse = await fetch('{% url "staff_webauthn_authentication_options" %}', {
                 method: 'POST',
@@ -188,6 +196,13 @@
 
         try {
             const csrfToken = getCookie('csrftoken');
+            if (!csrfToken) {
+                // Fallback to template variable
+                const metaCsrf = document.querySelector('meta[name=\"csrf-token\"]');
+                if (metaCsrf) {
+                    csrfToken = metaCsrf.getAttribute('content');
+                }
+            }
             const username = document.getElementById('username')?.value.trim();
             const optionsResponse = await fetch('{% url "staff_webauthn_authentication_options" %}', {
                 method: 'POST',

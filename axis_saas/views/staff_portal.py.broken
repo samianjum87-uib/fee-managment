@@ -1,42 +1,6 @@
-#!/usr/bin/env python3
-"""
-axis_patcher_restore.py
-
-Restores staff_portal.py to a correct, working version with proper syntax
-and adds logging for debugging.
-
-Usage:
-    python axis_patcher_restore.py [--dry-run] [--verbose] [--target-dir PATH]
-
-Options:
-    --dry-run       Show what would be changed without writing.
-    --verbose       Print detailed progress.
-    --target-dir    Project root directory (default: current directory).
-"""
-
-import os
-import sys
-import shutil
+import json
 import logging
-import argparse
-from pathlib import Path
-
-# ----------------------------------------------------------------------
-# Logging setup
-# ----------------------------------------------------------------------
-log = logging.getLogger("axis_patcher_restore")
-log.setLevel(logging.INFO)
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-log.addHandler(handler)
-
-
-# ----------------------------------------------------------------------
-# The correct content for axis_saas/views/staff_portal.py
-# This is the original code with syntax fixes and added logging.
-# ----------------------------------------------------------------------
-CORRECT_STAFF_PORTAL_PY = '''import json
-import logging
+logger = logging.getLogger(__name__)
 import secrets
 import uuid
 from datetime import datetime
@@ -58,8 +22,6 @@ from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_
 from webauthn.helpers.structs import AttestationConveyancePreference, AuthenticatorAttachment, AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, ResidentKeyRequirement, UserVerificationRequirement
 
 from axis_saas.models import Notification, SchoolClass, Staff, StaffCredential, Student, StudentAttendance, WebAuthnCredential
-
-logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request):
@@ -379,31 +341,12 @@ def staff_webauthn_registration_options(request):
 
 @require_staff_login
 @require_http_methods(['POST'])
-def staff_webauthn_registration_verify(request):
-    logger.info(f"Registration verify called for staff {request.session.get('staff_id')}")
-    schema_name = request.session.get('staff_schema_name')
-    staff_id = request.session.get('staff_id')
-    expected_challenge = request.session.get('staff_webauthn_registration_challenge')
-    if not schema_name or not staff_id or not expected_challenge:
-        return JsonResponse({'success': False, 'message': 'Registration session expired.'}, status=400)
-
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse({'success': False, 'message': 'Invalid registration payload.'}, status=400)
-
-    with schema_context('public'):
-        credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
-        if credential is None:
-            return JsonResponse({'success': False, 'message': 'Credential not found.'}, status=404)
-        verification = verify_registration_response(
-            credential=payload,
-            expected_challenge=base64url_to_bytes(expected_challenge),
-            expected_rp_id=_staff_compute_rp_id(request),
+def staff_webauthn_registration_verify(request):expected_rp_id=_staff_compute_rp_id(request),
             expected_origin=_staff_expected_origins(request),
             require_user_verification=True,
         )
         logger.info(f"WebAuthn registration verification succeeded for credential_id={bytes_to_base64url(verification.credential_id)}")
+
         WebAuthnCredential.objects.update_or_create(
             credential_id=bytes_to_base64url(verification.credential_id),
             defaults={
@@ -414,57 +357,7 @@ def staff_webauthn_registration_verify(request):
                 'is_active': True,
             },
         )
-        request.session.pop('staff_webauthn_registration_challenge', None)
-        logger.info('Registration success, returning success response')
-        return JsonResponse({'success': True, 'message': 'Passkey registered successfully.'})
-
-
-@require_http_methods(['POST'])
-def staff_webauthn_authentication_options(request):
-    data = {}
-    if request.content_type and 'application/json' in request.content_type:
-        try:
-            data = json.loads(request.body.decode('utf-8') or '{}')
-        except json.JSONDecodeError:
-            data = {}
-    username = (data.get('username') or request.POST.get('username') or '').strip()
-    staff_id = request.session.get('staff_id')
-    schema_name = request.session.get('staff_schema_name')
-
-    passkeys = []
-    if username:
-        with schema_context('public'):
-            credential = StaffCredential.objects.filter(username=username, is_active=True).first()
-            if credential is None:
-                return JsonResponse({'error': 'Account not found.'}, status=404)
-            passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
-        if not passkeys:
-            return JsonResponse({'error': 'No passkeys registered for this account.'}, status=403)
-        request.session['staff_webauthn_login_username'] = credential.username
-        request.session['staff_webauthn_login_staff_id'] = credential.staff_id
-        request.session['staff_webauthn_login_schema_name'] = credential.schema_name
-    elif staff_id and schema_name:
-        with schema_context('public'):
-            credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
-            if credential is None:
-                return JsonResponse({'error': 'Credential not found.'}, status=404)
-            passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
-        if not passkeys:
-            return JsonResponse({'error': 'No passkeys registered for this account.'}, status=403)
-        request.session['staff_webauthn_login_username'] = credential.username
-        request.session['staff_webauthn_login_staff_id'] = credential.staff_id
-        request.session['staff_webauthn_login_schema_name'] = credential.schema_name
-    else:
-        with schema_context('public'):
-            passkeys = list(WebAuthnCredential.objects.filter(is_active=True).select_related('staff_credential'))
-        request.session['staff_webauthn_login_username'] = ''
-        request.session['staff_webauthn_login_staff_id'] = ''
-        request.session['staff_webauthn_login_schema_name'] = ''
-
-    challenge = secrets.token_bytes(32)
-    request.session['staff_webauthn_auth_challenge'] = bytes_to_base64url(challenge)
-    allow_credentials = [
-        PublicKeyCredentialDescriptor(id=base64url_to_bytes(item.credential_id), type='public-key')
+        request.session.pop('staff_webauthn_registration_challenge', None)type='public-key')
         for item in passkeys
     ]
     options = generate_authentication_options(
@@ -478,41 +371,7 @@ def staff_webauthn_authentication_options(request):
 
 
 @require_http_methods(['POST'])
-def staff_webauthn_authentication_verify(request):
-    logger.info(f"Authentication verify called for credential {request.session.get('staff_username')}")
-    expected_challenge = request.session.get('staff_webauthn_auth_challenge')
-    login_username = request.session.get('staff_webauthn_login_username')
-    login_staff_id = request.session.get('staff_webauthn_login_staff_id')
-    login_schema_name = request.session.get('staff_webauthn_login_schema_name')
-    staff_id = request.session.get('staff_id')
-    schema_name = request.session.get('staff_schema_name')
-
-    if not expected_challenge:
-        return JsonResponse({'success': False, 'message': 'Passkey challenge expired. Please sign in again.'}, status=400)
-
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse({'success': False, 'message': 'Invalid passkey payload.'}, status=400)
-
-    credential_id = payload.get('id')
-    if not credential_id:
-        return JsonResponse({'success': False, 'message': 'Passkey identifier missing.'}, status=400)
-
-    with schema_context('public'):
-        webauthn_credential = WebAuthnCredential.objects.filter(credential_id=credential_id, is_active=True).select_related('staff_credential').first()
-        if webauthn_credential is None:
-            return JsonResponse({'success': False, 'message': 'Passkey not recognized.'}, status=404)
-        if login_username and webauthn_credential.staff_credential.username != login_username:
-            return JsonResponse({'success': False, 'message': 'This passkey does not belong to the provided username.'}, status=403)
-        if login_staff_id and str(webauthn_credential.staff_credential.staff_id) != str(login_staff_id):
-            return JsonResponse({'success': False, 'message': 'This passkey is not registered for the selected account.'}, status=403)
-        if login_schema_name and webauthn_credential.staff_credential.schema_name != login_schema_name:
-            return JsonResponse({'success': False, 'message': 'This passkey belongs to a different tenant.'}, status=403)
-        verification = verify_authentication_response(
-            credential=payload,
-            expected_challenge=base64url_to_bytes(expected_challenge),
-            expected_rp_id=_staff_compute_rp_id(request),
+def staff_webauthn_authentication_verify(request):expected_rp_id=_staff_compute_rp_id(request),
             expected_origin=_staff_expected_origins(request),
             credential_public_key=base64url_to_bytes(webauthn_credential.public_key),
             credential_current_sign_count=webauthn_credential.sign_count,
@@ -552,147 +411,7 @@ def staff_webauthn_authentication_verify(request):
     request.session.pop('staff_webauthn_auth_challenge', None)
     request.session.pop('staff_webauthn_login_username', None)
     request.session.pop('staff_webauthn_login_staff_id', None)
-    request.session.pop('staff_webauthn_login_schema_name', None)
-    logger.info('Authentication success, returning redirect')
-    return JsonResponse({'success': True, 'message': 'Passkey verified successfully.', 'redirect': '/portal/staff/dashboard/'})
-
-
-@require_staff_login
-@require_http_methods(['POST'])
-def staff_webauthn_remove_credential(request, credential_id):
-    schema_name = request.session.get('staff_schema_name')
-    staff_id = request.session.get('staff_id')
-    if not schema_name or not staff_id:
-        return JsonResponse({'success': False, 'message': 'Authentication required.'}, status=401)
-
-    with schema_context('public'):
-        passkey = WebAuthnCredential.objects.filter(
-            pk=credential_id,
-            staff_credential__staff_id=staff_id,
-            staff_credential__schema_name=schema_name,
-            is_active=True,
-        ).first()
-        if passkey is None:
-            return JsonResponse({'success': False, 'message': 'Passkey not found.'}, status=404)
-        passkey.is_active = False
-        passkey.save(update_fields=['is_active'])
-
-    return JsonResponse({'success': True, 'message': 'Passkey removed successfully.'})
-
-
-@require_staff_login
-@require_http_methods(['POST'])
-def staff_change_password(request):
-    schema_name = request.session['staff_schema_name']
-    from django_tenants.utils import schema_context
-    old_password = request.POST.get('old_password')
-    new_password = request.POST.get('new_password')
-    confirm_password = request.POST.get('confirm_password')
-    cnic = (request.POST.get('cnic') or '').strip()
-    dob = request.POST.get('date_of_birth')
-
-    with schema_context(schema_name):
-        staff = Staff.objects.filter(pk=request.session['staff_id']).first()
-        if staff is None:
-            return JsonResponse({'success': False, 'message': 'Staff account not found.'}, status=404) if request.headers.get('x-requested-with') == 'XMLHttpRequest' else redirect('staff_profile_page')
-        if staff.status != 'active':
-            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'message': 'This account is suspended and cannot change password.'}, status=403)
-            messages.error(request, 'This account is suspended and cannot change password.')
-            return redirect('staff_profile_page')
-
-        if request.POST.get('verify_type') == 'self_reset':
-            cnic_ok = bool(staff.cnic) and str(staff.cnic).replace('-', '').replace(' ', '').lower() == str(cnic).replace('-', '').replace(' ', '').lower()
-            dob_ok = bool(staff.date_of_birth) and staff.date_of_birth.isoformat() == str(dob)
-            if not cnic_ok or not dob_ok:
-                if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                    return JsonResponse({'success': False, 'message': 'Your CNIC and date of birth do not match the staff record.'}, status=400)
-                messages.error(request, 'Your CNIC and date of birth do not match the staff record.')
-                return redirect('staff_profile_page')
-
-    with schema_context('public'):
-        credential = StaffCredential.objects.filter(staff_id=request.session['staff_id'], schema_name=schema_name).first()
-        if not credential or not credential.check_password(old_password):
-            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'message': 'Current password is incorrect.'}, status=400)
-            messages.error(request, 'Current password is incorrect.')
-            return redirect('staff_profile_page')
-        if new_password != confirm_password:
-            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'message': 'New passwords do not match.'}, status=400)
-            messages.error(request, 'New passwords do not match.')
-            return redirect('staff_profile_page')
-        if len(new_password) < 12 or not any(ch.isupper() for ch in new_password) or not any(ch.isdigit() for ch in new_password) or not any(ch in '!@#$%^&*' for ch in new_password):
-            if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'message': 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.'}, status=400)
-            messages.error(request, 'Password must contain at least 12 chars, one uppercase, one digit, and one symbol.')
-            return redirect('staff_profile_page')
-        credential.set_password(new_password)
-        credential.save(update_fields=['password', 'visible_password'])
-        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-            return JsonResponse({'success': True, 'message': 'Password updated successfully.'})
-        messages.success(request, 'Password updated successfully.')
-        return redirect('staff_profile_page')
-
-
-@require_staff_login
-@require_http_methods(['GET'])
-def staff_notifications(request):
-    schema_name = request.session['staff_schema_name']
-    from django_tenants.utils import schema_context
-    with schema_context(schema_name):
-        notifications = Notification.objects.all().order_by('-created_at')
-    return render(request, 'mobile/staff/notifications.html', {'notifications': notifications})
-
-
-@require_staff_login
-@require_http_methods(['GET'])
-def staff_more(request):
-    schema_name = request.session['staff_schema_name']
-    from django_tenants.utils import schema_context
-    with schema_context(schema_name):
-        staff = Staff.objects.get(pk=request.session['staff_id'])
-        notifications_count = Notification.objects.filter(is_read=False).count()
-    return render(request, 'mobile/staff/more.html', {
-        'staff': staff,
-        'notifications_count': notifications_count,
-    })
-
-
-@require_staff_login
-@require_http_methods(['POST'])
-def staff_mark_notification_read(request, notif_id):
-    schema_name = request.session['staff_schema_name']
-    from django_tenants.utils import schema_context
-    with schema_context(schema_name):
-        notification = get_object_or_404(Notification, pk=notif_id)
-        notification.is_read = True
-        notification.save(update_fields=['is_read'])
-    return JsonResponse({'success': True})
-
-
-@require_staff_login
-def staff_student_profile(request, student_id):
-    schema_name = request.session['staff_schema_name']
-    from django_tenants.utils import schema_context
-    with schema_context(schema_name):
-        staff = get_object_or_404(Staff, pk=request.session['staff_id'])
-        student = get_object_or_404(Student, pk=student_id)
-        if student.school_class and not (student.school_class.class_teacher_id == staff.pk or student.school_class.class_subjects.filter(teacher=staff).exists()):
-            return render(request, 'mobile/staff/403.html', status=403)
-        attendance_summary = StudentAttendance.objects.filter(student=student).order_by('-date')[:10]
-    return render(request, 'mobile/staff/student_profile.html', {'staff': staff, 'student': student, 'attendance_summary': attendance_summary})
-
-
-@require_staff_login
-def staff_api_classes(request):
-    schema_name = request.session['staff_schema_name']
-    from django_tenants.utils import schema_context
-    with schema_context(schema_name):
-        staff = Staff.objects.get(pk=request.session['staff_id'])
-        classes = SchoolClass.objects.filter(Q(class_teacher=staff) | Q(class_subjects__teacher=staff)).distinct().annotate(student_count=Count('students')).order_by('name', 'section')
-        payload = [
-            {'id': cls.pk, 'name': str(cls), 'student_count': cls.student_count}
+    request.session.pop('staff_webauthn_login_schema_name', None)'student_count': cls.student_count}
             for cls in classes
         ]
     return JsonResponse({'classes': payload})
@@ -751,64 +470,3 @@ def staff_api_profile(request):
     with schema_context(schema_name):
         staff = get_object_or_404(Staff, pk=request.session['staff_id'])
     return JsonResponse({'id': staff.pk, 'name': staff.full_name, 'role': staff.role, 'email': staff.email, 'phone': staff.phone})
-'''
-
-
-# ----------------------------------------------------------------------
-# Main restoration function
-# ----------------------------------------------------------------------
-
-def restore_staff_portal(project_root: Path, dry_run: bool, verbose: bool) -> bool:
-    """Overwrite staff_portal.py with the correct content."""
-    view_path = project_root / "axis_saas" / "views" / "staff_portal.py"
-
-    if dry_run:
-        log.info(f"DRY-RUN: would write {view_path} with correct content.")
-        return True
-
-    # Backup current file if it exists
-    if view_path.exists():
-        backup_path = view_path.with_suffix(view_path.suffix + ".broken")
-        try:
-            shutil.copy2(view_path, backup_path)
-            log.info(f"Backed up current (broken) file to {backup_path}")
-        except Exception as e:
-            log.warning(f"Could not backup: {e}")
-
-    # Write corrected content
-    try:
-        view_path.parent.mkdir(parents=True, exist_ok=True)
-        view_path.write_text(CORRECT_STAFF_PORTAL_PY, encoding="utf-8")
-        log.info(f"Successfully restored {view_path} with correct content.")
-        return True
-    except Exception as e:
-        log.error(f"Failed to write {view_path}: {e}")
-        return False
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Restore staff_portal.py to a correct version.")
-    parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying.")
-    parser.add_argument("--verbose", action="store_true", help="Show detailed output.")
-    parser.add_argument("--target-dir", default=".", help="Project root directory (default: current).")
-    args = parser.parse_args()
-
-    if args.verbose:
-        log.setLevel(logging.DEBUG)
-
-    project_root = Path(args.target_dir).resolve()
-    if not project_root.exists():
-        log.error(f"Target directory {project_root} does not exist.")
-        sys.exit(1)
-
-    log.info(f"Starting restoration in {project_root} (dry_run={args.dry_run})")
-
-    if restore_staff_portal(project_root, args.dry_run, args.verbose):
-        log.info("Restoration completed successfully.")
-    else:
-        log.error("Restoration failed.")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
