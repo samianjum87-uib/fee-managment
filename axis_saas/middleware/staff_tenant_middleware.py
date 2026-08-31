@@ -76,6 +76,10 @@ class StaffTenantMiddleware:
 
         # Determine if passkey is required and enforce redirect
         try:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Middleware: staff_id={staff_id}, schema={schema_name}")
+            logger.info(f"Credential exists: {credential is not None}, has_passkey: {credential.has_passkey if credential else False}")
             from axis_saas.models import StaffCredential
             with schema_context('public'):
                 credential = StaffCredential.objects.filter(
@@ -98,7 +102,10 @@ class StaffTenantMiddleware:
                 if request.path_info not in allowed_paths:
                     from django.shortcuts import redirect
                     return redirect('staff_profile_page')
-        except Exception:
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Middleware error: {e}")
             request.staff_passkey_required = False
 
         return self.get_response(request)

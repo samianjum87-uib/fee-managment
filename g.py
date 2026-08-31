@@ -1,104 +1,141 @@
 #!/usr/bin/env python3
 """
-axis_quote_fixer.py - Fix broken quotes and duplicate decorators in staff_portal.py.
+axis_fixer_final.py - Final fix for staff_portal.py and middleware.
+
+This script applies known fixes:
+1. Removes duplicate decorators in staff_portal.py.
+2. Ensures no escaped quotes remain.
+3. Adds proper error handling in middleware.
+4. Adds logging to help debug issues.
+
+Run this on your server (or locally and redeploy) to fix the 500 error.
 
 Usage:
-    python axis_quote_fixer.py [--dry-run] [--verbose] [--target-dir PATH]
+    python axis_fixer_final.py [--dry-run] [--verbose] [--target-dir PATH]
 """
 
-import sys
 import re
+import sys
 from pathlib import Path
 from datetime import datetime
+from typing import List, Tuple
 
-TARGET_FILE = "axis_saas/views/staff_portal.py"
+# ----------------------------------------------------------------------
+# PATCH DEFINITIONS
+# ----------------------------------------------------------------------
 
-# The exact broken string (with backslashes as they appear in the file)
-BROKEN_QUOTE = "request.session[\\'staff_session_token\\']"
-CORRECT_QUOTE = "request.session['staff_session_token']"
+PATCHES: List[Tuple[str, str, str, str]] = []
 
-# Patterns for duplicate decorator removal
-DECORATOR_PATTERN = re.compile(
+STAFF_PORTAL = "axis_saas/views/staff_portal.py"
+MIDDLEWARE_FILE = "axis_saas/middleware/staff_tenant_middleware.py"
+
+# 1. Remove duplicate decorators in staff_portal.py
+PATCHES.append((
+    STAFF_PORTAL,
     r'(@require_staff_login\s+@require_http_methods\(\[\'POST\'\]\)\s*)\s*@require_staff_login\s+@require_http_methods\(\[\'POST\'\]\)',
-    re.DOTALL | re.MULTILINE
-)
-DECORATOR_REPLACE = r'\1'
+    r'\1',
+    "Remove duplicate decorators (registration_verify)"
+))
 
-DECORATOR2_PATTERN = re.compile(
+PATCHES.append((
+    STAFF_PORTAL,
     r'(@require_http_methods\(\[\'POST\'\]\)\s*)\s*@require_http_methods\(\[\'POST\'\]\)',
-    re.DOTALL | re.MULTILINE
-)
-DECORATOR2_REPLACE = r'\1'
+    r'\1',
+    "Remove duplicate decorators (authentication endpoints)"
+))
 
+# 2. Fix any escaped quotes that might remain
+PATCHES.append((
+    STAFF_PORTAL,
+    r"request\.session\\\['staff_session_token'\\\]",
+    "request.session['staff_session_token']",
+    "Fix escaped quotes in staff_session_token assignment"
+))
 
-def fix_file(target_dir, dry_run=False, verbose=False):
-    full_path = target_dir / TARGET_FILE
-    if not full_path.exists():
-        print(f"Error: {full_path} not found.")
-        return False
+# 3. Add try/except logging in middleware to capture errors
+PATCHES.append((
+    MIDDLEWARE_FILE,
+    r'(# Determine if passkey is required and enforce redirect\s*try:)',
+    r'\1\n            import logging\n            logger = logging.getLogger(__name__)\n            logger.info(f"Middleware: staff_id={staff_id}, schema={schema_name}")\n            logger.info(f"Credential exists: {credential is not None}, has_passkey: {credential.has_passkey if credential else False}")',
+    "Add logging to middleware"
+))
 
-    try:
-        content = full_path.read_text(encoding='utf-8')
-    except Exception as e:
-        print(f"Failed to read {full_path}: {e}")
-        return False
+# 4. Ensure that request.staff_passkey_required is always set, even on exception
+PATCHES.append((
+    MIDDLEWARE_FILE,
+    r'(except Exception:\s+request\.staff_passkey_required = False)',
+    r'except Exception as e:\n            import logging\n            logger = logging.getLogger(__name__)\n            logger.error(f"Middleware error: {e}")\n            request.staff_passkey_required = False',
+    "Add error logging in middleware exception"
+))
 
-    original = content
-    changes = []
+# ----------------------------------------------------------------------
+# PATCHER ENGINE
+# ----------------------------------------------------------------------
 
-    # 1. Fix the broken quotes using string replacement (exact match)
-    if BROKEN_QUOTE in content:
-        content = content.replace(BROKEN_QUOTE, CORRECT_QUOTE)
-        changes.append("Replaced broken staff_session_token assignment")
-        if verbose:
-            print("Fixed broken quotes")
-    else:
-        if verbose:
-            print("Broken quotes not found (already fixed?)")
+class Patcher:
+    def __init__(self, target_dir: Path, dry_run: bool = False, verbose: bool = False):
+        self.target_dir = target_dir
+        self.dry_run = dry_run
+        self.verbose = verbose
+        self.logs: List[str] = []
 
-    # 2. Remove duplicate decorators for registration_verify
-    new_content, count = DECORATOR_PATTERN.subn(DECORATOR_REPLACE, content)
-    if count:
-        content = new_content
-        changes.append(f"Removed {count} duplicate decorator block(s) for registration_verify")
-        if verbose:
-            print(f"Removed {count} duplicate decorators")
+    def log(self, msg: str, level: str = "INFO"):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_line = f"[{timestamp}] {level}: {msg}"
+        self.logs.append(log_line)
+        if self.verbose or level in ("ERROR", "WARNING"):
+            print(log_line)
 
-    # 3. Remove duplicate decorators for authentication endpoints
-    new_content, count = DECORATOR2_PATTERN.subn(DECORATOR2_REPLACE, content)
-    if count:
-        content = new_content
-        changes.append(f"Removed {count} duplicate decorator block(s) for authentication endpoints")
-        if verbose:
-            print(f"Removed {count} duplicate decorators")
+    def apply_patch(self, file_path: str, search: str, replace: str, desc: str) -> bool:
+        full_path = self.target_dir / file_path
+        if not full_path.exists():
+            self.log(f"File not found: {full_path}", "ERROR")
+            return False
 
-    if content == original:
-        print("No changes needed.")
-        return True
+        try:
+            content = full_path.read_text(encoding='utf-8')
+        except Exception as e:
+            self.log(f"Failed to read {full_path}: {e}", "ERROR")
+            return False
 
-    if dry_run:
-        print("Dry run: would write changes to", full_path)
-        if verbose:
-            print("--- Original (first 500 chars)")
-            print(original[:500])
-            print("--- New (first 500 chars)")
-            print(content[:500])
-        return True
+        pattern = re.compile(search, re.DOTALL | re.MULTILINE)
+        new_content, count = pattern.subn(replace, content)
+        if count == 0:
+            self.log(f"Pattern not found or no replacement made in {file_path}: {desc}", "WARNING")
+            return False
 
-    try:
-        full_path.write_text(content, encoding='utf-8')
-        print("Successfully updated", full_path)
-        for change in changes:
-            print(" -", change)
-        return True
-    except Exception as e:
-        print(f"Failed to write {full_path}: {e}")
-        return False
+        if self.dry_run:
+            self.log(f"[DRY RUN] Would patch {file_path}: {desc} ({count} replacements)", "INFO")
+            return True
+
+        try:
+            full_path.write_text(new_content, encoding='utf-8')
+            self.log(f"Patched {file_path}: {desc} ({count} replacements)", "INFO")
+            return True
+        except Exception as e:
+            self.log(f"Failed to write {full_path}: {e}", "ERROR")
+            return False
+
+    def run(self):
+        self.log(f"Starting final patcher with target dir: {self.target_dir}")
+        self.log(f"Dry run: {self.dry_run}, Verbose: {self.verbose}")
+
+        success_count = 0
+        fail_count = 0
+        for file_path, search, replace, desc in PATCHES:
+            if self.apply_patch(file_path, search, replace, desc):
+                success_count += 1
+            else:
+                fail_count += 1
+
+        self.log(f"Patches applied: {success_count} successful, {fail_count} failed.")
+        return success_count > 0
 
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Fix broken quotes and duplicate decorators in staff_portal.py.")
+
+    parser = argparse.ArgumentParser(description="Final fixes for Staff Portal 500 error.")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying.")
     parser.add_argument("--verbose", action="store_true", help="Show detailed output.")
     parser.add_argument("--target-dir", default=".", help="Project root directory (default: current directory).")
@@ -106,12 +143,21 @@ def main():
 
     target_dir = Path(args.target_dir).resolve()
     if not target_dir.is_dir():
-        print(f"Error: {target_dir} is not a valid directory.")
+        print(f"Error: {target_dir} is not a valid directory.", file=sys.stderr)
         sys.exit(1)
 
-    success = fix_file(target_dir, dry_run=args.dry_run, verbose=args.verbose)
-    if not success:
-        sys.exit(1)
+    patcher = Patcher(target_dir, dry_run=args.dry_run, verbose=args.verbose)
+    success = patcher.run()
+
+    if args.dry_run:
+        print("\nDry run completed. No files were modified.")
+    else:
+        if success:
+            print("\nFixes applied successfully. Please restart your server.")
+            print("If the issue persists, check the server logs for the specific error.")
+        else:
+            print("\nSome fixes failed. See logs above.", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":
