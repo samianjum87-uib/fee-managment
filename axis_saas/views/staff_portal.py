@@ -70,8 +70,9 @@ def staff_login(request):
                 request.session['staff_username'] = credential.username
                 request.session['staff_role'] = staff.role
                 request.session['staff_name'] = staff.full_name
-                request.session['staff_session_token'] = uuid.uuid4().hex
-
+                request.session[\'staff_session_token\'] = uuid.uuid4().hex
+                request.session.set_expiry(1800)
+                request.session.modified = True
                 session_keys = cache.get(f'staff_session_keys:{credential.schema_name}:{staff.pk}', [])
                 if isinstance(session_keys, str):
                     session_keys = [session_keys]
@@ -340,8 +341,7 @@ def staff_webauthn_registration_options(request):
 @require_staff_login
 @require_http_methods(['POST'])
 
-@require_staff_login
-@require_http_methods(['POST'])
+
 def staff_webauthn_registration_verify(request):
     logger.info(f"Registration verify called for staff {request.session.get('staff_id')}")
     schema_name = request.session.get('staff_schema_name')
@@ -398,7 +398,7 @@ def staff_webauthn_registration_verify(request):
 
 @require_http_methods(['POST'])
 
-@require_http_methods(['POST'])
+
 def staff_webauthn_authentication_options(request):
     data = {}
     if request.content_type and 'application/json' in request.content_type:
@@ -442,7 +442,7 @@ def staff_webauthn_authentication_options(request):
 
 @require_http_methods(['POST'])
 
-@require_http_methods(['POST'])
+
 def staff_webauthn_authentication_verify(request):
     logger.info(f"Authentication verify called for credential {request.session.get('staff_username')}")
     expected_challenge = request.session.get('staff_webauthn_auth_challenge')
@@ -493,8 +493,9 @@ def staff_webauthn_authentication_verify(request):
         request.session['staff_schema_name'] = target_schema_name
         request.session['staff_username'] = webauthn_credential.staff_credential.username
         request.session['staff_pending_webauthn'] = False
-        request.session['staff_session_token'] = uuid.uuid4().hex
-
+        request.session[\'staff_session_token\'] = uuid.uuid4().hex
+        request.session.set_expiry(1800)
+        request.session.modified = True
         with schema_context(target_schema_name):
             staff = Staff.objects.filter(pk=target_staff_id).first()
             if staff:
