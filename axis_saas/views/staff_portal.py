@@ -71,8 +71,6 @@ def staff_login(request):
                 request.session['staff_role'] = staff.role
                 request.session['staff_name'] = staff.full_name
                 request.session['staff_session_token'] = uuid.uuid4().hex
-                request.session.set_expiry(1800)
-                request.session.modified = True
 
                 session_keys = cache.get(f'staff_session_keys:{credential.schema_name}:{staff.pk}', [])
                 if isinstance(session_keys, str):
@@ -496,8 +494,6 @@ def staff_webauthn_authentication_verify(request):
         request.session['staff_username'] = webauthn_credential.staff_credential.username
         request.session['staff_pending_webauthn'] = False
         request.session['staff_session_token'] = uuid.uuid4().hex
-        request.session.set_expiry(1800)
-        request.session.modified = True
 
         with schema_context(target_schema_name):
             staff = Staff.objects.filter(pk=target_staff_id).first()
