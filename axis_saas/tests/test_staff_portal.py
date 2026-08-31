@@ -63,3 +63,29 @@ class StaffPortalTests(TestCase):
         self.assertEqual(data['authenticatorSelection']['authenticatorAttachment'], 'platform')
         self.assertEqual(data['authenticatorSelection']['userVerification'], 'required')
         self.assertIn('rpId', data)
+
+    def test_webauthn_authentication_options_accept_username_for_passwordless_login(self):
+        with schema_context(self.tenant.schema_name):
+            staff = Staff.objects.create(
+                first_name='Hina',
+                last_name='Javed',
+                email='hina@example.com',
+                job_title='Science Teacher',
+                department='teaching',
+                phone='03005556677',
+                role='teacher',
+            )
+            cred = StaffCredential.objects.get(staff_id=staff.id, schema_name=self.tenant.schema_name)
+            cred.set_password('StrongPass@123')
+            cred.save(update_fields=['password'])
+
+        response = self.client.post(
+            '/portal/staff/security/webauthn/auth/options/',
+            data={'username': cred.username},
+            content_type='application/json',
+            secure=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn('challenge', payload)
+        self.assertIn('allowCredentials', payload)

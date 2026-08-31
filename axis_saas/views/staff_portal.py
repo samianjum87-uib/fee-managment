@@ -390,18 +390,40 @@ def staff_webauthn_registration_verify(request):
 
 @require_http_methods(['POST'])
 def staff_webauthn_authentication_options(request):
+    data = {}
+    if request.content_type and 'application/json' in request.content_type:
+        try:
+            data = json.loads(request.body.decode('utf-8') or '{}')
+        except json.JSONDecodeError:
+            data = {}
+    username = (data.get('username') or request.POST.get('username') or '').strip()
     staff_id = request.session.get('staff_id')
     schema_name = request.session.get('staff_schema_name')
-    if not staff_id or not schema_name:
-        return JsonResponse({'error': 'Authentication required.'}, status=401)
 
-    with schema_context('public'):
-        credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
-        if credential is None:
-            return JsonResponse({'error': 'Credential not found.'}, status=404)
-        passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
-    if not passkeys:
-        return JsonResponse({'error': 'No passkeys registered for this account.'}, status=403)
+    if username:
+        with schema_context('public'):
+            credential = StaffCredential.objects.filter(username=username, is_active=True).first()
+            if credential is None:
+                return JsonResponse({'error': 'Account not found.'}, status=404)
+            passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
+        if not passkeys:
+            return JsonResponse({'error': 'No passkeys registered for this account.'}, status=403)
+        request.session['staff_webauthn_login_username'] = credential.username
+        request.session['staff_webauthn_login_staff_id'] = credential.staff_id
+        request.session['staff_webauthn_login_schema_name'] = credential.schema_name
+    else:
+        if not staff_id or not schema_name:
+            return JsonResponse({'error': 'Authentication required.'}, status=401)
+        with schema_context('public'):
+            credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
+            if credential is None:
+                return JsonResponse({'error': 'Credential not found.'}, status=404)
+            passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
+        if not passkeys:
+            return JsonResponse({'error': 'No passkeys registered for this account.'}, status=403)
+        request.session['staff_webauthn_login_username'] = credential.username
+        request.session['staff_webauthn_login_staff_id'] = credential.staff_id
+        request.session['staff_webauthn_login_schema_name'] = credential.schema_name
 
     challenge = secrets.token_bytes(32)
     request.session['staff_webauthn_auth_challenge'] = bytes_to_base64url(challenge)
@@ -421,10 +443,14 @@ def staff_webauthn_authentication_options(request):
 
 @require_http_methods(['POST'])
 def staff_webauthn_authentication_verify(request):
+    expected_challenge = request.session.get('staff_webauthn_auth_challenge')
+    login_username = request.session.get('staff_webauthn_login_username')
+    login_staff_id = request.session.get('staff_webauthn_login_staff_id')
+    login_schema_name = request.session.get('staff_webauthn_login_schema_name')
     staff_id = request.session.get('staff_id')
     schema_name = request.session.get('staff_schema_name')
-    expected_challenge = request.session.get('staff_webauthn_auth_challenge')
-    if not staff_id or not schema_name or not expected_challenge:
+
+    if not expected_challenge:
         return JsonResponse({'success': False, 'message': 'Passkey challenge expired. Please sign in again.'}, status=400)
 
     try:
@@ -440,6 +466,12 @@ def staff_webauthn_authentication_verify(request):
         webauthn_credential = WebAuthnCredential.objects.filter(credential_id=credential_id, is_active=True).select_related('staff_credential').first()
         if webauthn_credential is None:
             return JsonResponse({'success': False, 'message': 'Passkey not recognized.'}, status=404)
+        if login_username and webauthn_credential.staff_credential.username != login_username:
+            return JsonResponse({'success': False, 'message': 'This passkey does not belong to the provided username.'}, status=403)
+        if login_staff_id and str(webauthn_credential.staff_credential.staff_id) != str(login_staff_id):
+            return JsonResponse({'success': False, 'message': 'This passkey is not registered for the selected account.'}, status=403)
+        if login_schema_name and webauthn_credential.staff_credential.schema_name != login_schema_name:
+            return JsonResponse({'success': False, 'message': 'This passkey belongs to a different tenant.'}, status=403)
         verification = verify_authentication_response(
             credential=payload,
             expected_challenge=base64url_to_bytes(expected_challenge),
@@ -453,13 +485,61 @@ def staff_webauthn_authentication_verify(request):
         webauthn_credential.last_used = timezone.now()
         webauthn_credential.save(update_fields=['sign_count', 'last_used'])
 
-    token = uuid.uuid4().hex
-    request.session['staff_session_token'] = token
-    request.session['staff_pending_webauthn'] = False
-    request.session.modified = True
-    cache.set(f'staff_session_token:{schema_name}:{staff_id}', token, 1800)
+        target_staff_id = int(webauthn_credential.staff_credential.staff_id)
+        target_schema_name = webauthn_credential.staff_credential.schema_name
+        request.session['staff_id'] = target_staff_id
+        request.session['staff_schema_name'] = target_schema_name
+        request.session['staff_username'] = webauthn_credential.staff_credential.username
+        request.session['staff_pending_webauthn'] = False
+        request.session['staff_session_token'] = uuid.uuid4().hex
+        request.session.set_expiry(1800)
+        request.session.modified = True
+
+        with schema_context(target_schema_name):
+            staff = Staff.objects.filter(pk=target_staff_id).first()
+            if staff:
+                request.session['staff_role'] = staff.role
+                request.session['staff_name'] = staff.full_name
+
+        token = request.session['staff_session_token']
+        cache.set(f'staff_session_token:{target_schema_name}:{target_staff_id}', token, 1800)
+        session_keys = cache.get(f'staff_session_keys:{target_schema_name}:{target_staff_id}', [])
+        if isinstance(session_keys, str):
+            session_keys = [session_keys]
+        session_keys = [k for k in list(session_keys) if k]
+        if request.session.session_key:
+            session_keys.append(request.session.session_key)
+        cache.set(f'staff_session_keys:{target_schema_name}:{target_staff_id}', list(dict.fromkeys(session_keys)), 1800)
+        cache.set(f'staff_online:{target_schema_name}:{target_staff_id}', request.session.session_key, 1800)
+
     request.session.pop('staff_webauthn_auth_challenge', None)
+    request.session.pop('staff_webauthn_login_username', None)
+    request.session.pop('staff_webauthn_login_staff_id', None)
+    request.session.pop('staff_webauthn_login_schema_name', None)
     return JsonResponse({'success': True, 'message': 'Passkey verified successfully.', 'redirect': '/portal/staff/dashboard/'})
+
+
+@require_staff_login
+@require_http_methods(['POST'])
+def staff_webauthn_remove_credential(request, credential_id):
+    schema_name = request.session.get('staff_schema_name')
+    staff_id = request.session.get('staff_id')
+    if not schema_name or not staff_id:
+        return JsonResponse({'success': False, 'message': 'Authentication required.'}, status=401)
+
+    with schema_context('public'):
+        passkey = WebAuthnCredential.objects.filter(
+            pk=credential_id,
+            staff_credential__staff_id=staff_id,
+            staff_credential__schema_name=schema_name,
+            is_active=True,
+        ).first()
+        if passkey is None:
+            return JsonResponse({'success': False, 'message': 'Passkey not found.'}, status=404)
+        passkey.is_active = False
+        passkey.save(update_fields=['is_active'])
+
+    return JsonResponse({'success': True, 'message': 'Passkey removed successfully.'})
 
 
 @require_staff_login

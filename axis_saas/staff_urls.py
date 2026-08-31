@@ -22,6 +22,7 @@ from axis_saas.views.staff_portal import (
     staff_webauthn_authentication_verify,
     staff_webauthn_registration_options,
     staff_webauthn_registration_verify,
+    staff_webauthn_remove_credential,
 )
 
 urlpatterns = [
@@ -38,6 +39,7 @@ urlpatterns = [
     path('profile/change-password/', staff_change_password, name='staff_change_password'),
     path('security/webauthn/register/options/', staff_webauthn_registration_options, name='staff_webauthn_registration_options'),
     path('security/webauthn/register/verify/', staff_webauthn_registration_verify, name='staff_webauthn_registration_verify'),
+    path('security/webauthn/remove/<int:credential_id>/', staff_webauthn_remove_credential, name='staff_webauthn_remove_credential'),
     path('security/webauthn/auth/options/', staff_webauthn_authentication_options, name='staff_webauthn_authentication_options'),
     path('security/webauthn/auth/verify/', staff_webauthn_authentication_verify, name='staff_webauthn_authentication_verify'),
     path('notifications/', staff_notifications, name='staff_notifications'),

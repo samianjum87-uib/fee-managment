@@ -11,6 +11,11 @@
     {% if pending_passkey %}
         <div id="passkey-login-status" class="alert" style="color: #1d4ed8; background: rgba(59,130,246,.08);">Your password was accepted. Completing secure passkey verification…</div>
     {% endif %}
+    <div style="margin: 0 0 18px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: rgba(59,130,246,.04);">
+        <label for="passkey-username" style="display:block; margin-bottom:6px; font-weight:600;">Passkey Login</label>
+        <input id="passkey-username" type="text" autocomplete="username" placeholder="Enter your username" style="width:100%; padding: 0.8rem 0.9rem; border:1px solid var(--border); border-radius:0.75rem; background: var(--surface); color: var(--text); margin-bottom: 10px;">
+        <button type="button" id="passkey-login-btn" class="btn-secondary" style="width:100%; padding: 0.8rem 1rem; border-radius: 0.8rem; font-weight: 600;">Login with Passkey</button>
+    </div>
     <form method="post" style="display: grid; gap: 12px;">
         {% csrf_token %}
         <div>
@@ -65,9 +70,18 @@
         }
     }
 
-    async function completePendingPasskeyLogin() {
-        const status = document.getElementById('passkey-login-status');
-        if (!status) return;
+    async function loginWithPasskey(username) {
+        const status = document.getElementById('passkey-login-status') || document.createElement('div');
+        if (!document.getElementById('passkey-login-status')) {
+            status.id = 'passkey-login-status';
+            status.className = 'alert';
+            status.style.color = '#1d4ed8';
+            status.style.background = 'rgba(59,130,246,.08)';
+            const container = document.querySelector('.card');
+            if (container) {
+                container.insertBefore(status, container.firstChild.nextSibling);
+            }
+        }
 
         try {
             await ensureWebAuthnSupport();
@@ -86,7 +100,102 @@
                     'X-CSRFToken': csrfToken,
                     'X-Requested-With': 'XMLHttpRequest'
                 },
-                body: JSON.stringify({})
+                body: JSON.stringify({ username: username })
+            });
+
+            if (!optionsResponse.ok) {
+                const error = await optionsResponse.json().catch(() => ({ error: 'Passkey authentication unavailable.' }));
+                throw new Error(error.error || 'Passkey authentication unavailable.');
+            }
+
+            const options = await optionsResponse.json();
+            const publicKey = {
+                challenge: base64UrlToUint8Array(options.challenge),
+                timeout: options.timeout,
+                allowCredentials: (options.allowCredentials || []).map((item) => ({
+                    ...item,
+                    id: base64UrlToUint8Array(item.id)
+                })),
+                userVerification: options.userVerification || 'preferred'
+            };
+
+            const credential = await navigator.credentials.get({ publicKey });
+            const payload = {
+                id: credential.id,
+                rawId: uint8ArrayToBase64Url(new Uint8Array(credential.rawId)),
+                type: credential.type,
+                response: {
+                    authenticatorData: uint8ArrayToBase64Url(new Uint8Array(credential.response.authenticatorData)),
+                    clientDataJSON: uint8ArrayToBase64Url(new Uint8Array(credential.response.clientDataJSON)),
+                    signature: uint8ArrayToBase64Url(new Uint8Array(credential.response.signature)),
+                    userHandle: credential.response.userHandle ? uint8ArrayToBase64Url(new Uint8Array(credential.response.userHandle)) : null,
+                },
+                clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {}
+            };
+
+            const verifyResponse = await fetch('{% url "staff_webauthn_authentication_verify" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const verifyData = await verifyResponse.json();
+            if (!verifyResponse.ok || verifyData.success === false) {
+                throw new Error(verifyData.message || 'Passkey verification failed.');
+            }
+
+            if (verifyData.redirect) {
+                window.location.href = verifyData.redirect;
+                return;
+            }
+
+            status.textContent = verifyData.message || 'Passkey verified successfully.';
+        } catch (error) {
+            status.textContent = error.message || 'Passkey verification could not be completed.';
+            status.style.color = '#b91c1c';
+        }
+    }
+
+    document.getElementById('passkey-login-btn')?.addEventListener('click', function () {
+        const username = document.getElementById('passkey-username')?.value.trim();
+        if (!username) {
+            const status = document.getElementById('passkey-login-status');
+            if (status) {
+                status.textContent = 'Enter your username to continue with passkey login.';
+                status.style.color = '#b91c1c';
+            }
+            return;
+        }
+        loginWithPasskey(username);
+    });
+
+    async function completePendingPasskeyLogin() {
+        const status = document.getElementById('passkey-login-status');
+        if (!status) return;
+
+        try {
+            await ensureWebAuthnSupport();
+        } catch (error) {
+            status.textContent = error.message;
+            status.style.color = '#b91c1c';
+            return;
+        }
+
+        try {
+            const csrfToken = getCookie('csrftoken');
+            const username = document.getElementById('username')?.value.trim();
+            const optionsResponse = await fetch('{% url "staff_webauthn_authentication_options" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({ username: username || '' })
             });
 
             if (!optionsResponse.ok) {
