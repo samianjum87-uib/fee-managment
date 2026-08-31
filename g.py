@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-axis_patcher_cleanup.py - Final cleanup for staff_portal.py.
+axis_quote_fixer.py - Fix escaped quotes in staff_portal.py.
 
-Fixes:
-1. Remove duplicate decorators.
-2. Ensure session expiry and modified are set after token assignment in staff_login and staff_webauthn_authentication_verify.
-3. Remove any stray blank lines or extra decorators.
+Replaces all occurrences of:
+    request.session[\'staff_session_token\']
+with:
+    request.session['staff_session_token']
+
+Also removes any duplicate decorators that might cause issues.
 
 Usage:
-    python axis_patcher_cleanup.py [--dry-run] [--verbose] [--target-dir PATH]
+    python axis_quote_fixer.py [--dry-run] [--verbose] [--target-dir PATH]
 """
 
 import re
@@ -25,57 +27,30 @@ FILE_PATH = "axis_saas/views/staff_portal.py"
 
 PATCHES: List[Tuple[str, str, str, str]] = []
 
-# 1. Remove duplicate decorator blocks for registration_verify
+# 1. Fix the escaped quotes: replace [\'staff_session_token\'] with ['staff_session_token']
+# This pattern matches the exact broken string.
+PATCHES.append((
+    FILE_PATH,
+    r"request\.session\\\['staff_session_token'\\\]",
+    "request.session['staff_session_token']",
+    "Replace escaped quotes in staff_session_token assignment"
+))
+
+# 2. Remove duplicate decorator lines for registration_verify, authentication_options, authentication_verify.
+# This is optional but cleans up the file.
 PATCHES.append((
     FILE_PATH,
     r'(@require_staff_login\s+@require_http_methods\(\[\'POST\'\]\)\s*)\s*@require_staff_login\s+@require_http_methods\(\[\'POST\'\]\)',
     r'\1',
-    "Remove duplicate decorators for staff_webauthn_registration_verify"
+    "Remove duplicate decorators (staff_webauthn_registration_verify)"
 ))
 
-# 2. Remove duplicate decorator blocks for authentication_options
 PATCHES.append((
     FILE_PATH,
     r'(@require_http_methods\(\[\'POST\'\]\)\s*)\s*@require_http_methods\(\[\'POST\'\]\)',
     r'\1',
-    "Remove duplicate decorators for staff_webauthn_authentication_options"
+    "Remove duplicate decorators (authentication endpoints)"
 ))
-
-# 3. Remove duplicate decorator blocks for authentication_verify
-PATCHES.append((
-    FILE_PATH,
-    r'(@require_http_methods\(\[\'POST\'\]\)\s*)\s*@require_http_methods\(\[\'POST\'\]\)',
-    r'\1',
-    "Remove duplicate decorators for staff_webauthn_authentication_verify"
-))
-
-# 4. In staff_login, after the token assignment, ensure we have set_expiry and modified.
-# The pattern: request.session['staff_session_token'] = uuid.uuid4().hex
-# then a newline, then we need to insert set_expiry and modified.
-# We'll find the token assignment and then check if the next non-empty lines are set_expiry and modified.
-# If not, insert them.
-# We'll use a search that matches the token assignment, then optional whitespace, then maybe some lines,
-# then the session_keys line, and insert set_expiry and modified before session_keys.
-# We'll capture the indentation of the token assignment.
-PATCHES.append((
-    FILE_PATH,
-    r'^(\s*)request\.session\[\'staff_session_token\'\] = uuid\.uuid4\(\)\.hex\s*\n(?!\s*request\.session\.set_expiry\(1800\))(\s*)session_keys = cache\.get',
-    r'\1request.session[\'staff_session_token\'] = uuid.uuid4().hex\n\1request.session.set_expiry(1800)\n\1request.session.modified = True\n\2session_keys = cache.get',
-    "Add missing session expiry and modified in staff_login"
-))
-
-# 5. Similarly for staff_webauthn_authentication_verify.
-PATCHES.append((
-    FILE_PATH,
-    r'^(\s*)request\.session\[\'staff_session_token\'\] = uuid\.uuid4\(\)\.hex\s*\n(?!\s*request\.session\.set_expiry\(1800\))(\s*)with schema_context',
-    r'\1request.session[\'staff_session_token\'] = uuid.uuid4().hex\n\1request.session.set_expiry(1800)\n\1request.session.modified = True\n\2with schema_context',
-    "Add missing session expiry and modified in staff_webauthn_authentication_verify"
-))
-
-# 6. Also, there might be a stray duplicate of the token assignment with different indentation.
-# We'll ensure that there is only one set.
-
-# 7. Remove any extra blank lines that might cause issues (optional).
 
 # ----------------------------------------------------------------------
 # PATCHER ENGINE
@@ -107,6 +82,7 @@ class Patcher:
             self.log(f"Failed to read {full_path}: {e}", "ERROR")
             return False
 
+        # Use regex with DOTALL and MULTILINE to match across lines.
         pattern = re.compile(search, re.MULTILINE | re.DOTALL)
         if not pattern.search(content):
             self.log(f"Pattern not found in {file_path}: {desc}", "WARNING")
@@ -130,7 +106,7 @@ class Patcher:
             return False
 
     def run(self):
-        self.log(f"Starting cleanup patcher with target dir: {self.target_dir}")
+        self.log(f"Starting patcher with target dir: {self.target_dir}")
         self.log(f"Dry run: {self.dry_run}, Verbose: {self.verbose}")
 
         success_count = 0
@@ -148,7 +124,7 @@ class Patcher:
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Clean up staff_portal.py (duplicate decorators, session expiry).")
+    parser = argparse.ArgumentParser(description="Fix escaped quotes and duplicate decorators in staff_portal.py.")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying.")
     parser.add_argument("--verbose", action="store_true", help="Show detailed output.")
     parser.add_argument("--target-dir", default=".", help="Project root directory (default: current directory).")
@@ -166,7 +142,7 @@ def main():
         print("\nDry run completed. No files were modified.")
     else:
         if success:
-            print("\nCleanup applied successfully. Please restart your server.")
+            print("\nFixes applied successfully. Please restart your server.")
         else:
             print("\nSome fixes failed. See logs above.", file=sys.stderr)
             sys.exit(1)
