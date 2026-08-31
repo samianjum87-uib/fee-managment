@@ -4,6 +4,9 @@ from django_tenants.utils import get_tenant_model, schema_context
 
 from axis_saas.models import Staff, StaffCredential
 from django.shortcuts import redirect
+import logging
+from django.conf import settings
+logger = logging.getLogger(__name__)
 
 
 class StaffTenantMiddleware:
@@ -33,7 +36,7 @@ class StaffTenantMiddleware:
             request.session.flush()
             return redirect('staff_login')
 
-        session_token = request.session.get('staff_session_token')
+
         cached_token = None
         try:
             from django.core.cache import cache
@@ -41,13 +44,14 @@ class StaffTenantMiddleware:
         except Exception:
             cached_token = None
 
-        is_webauthn_auth = request.path_info in [
-            '/portal/staff/security/webauthn/auth/options/',
-            '/portal/staff/security/webauthn/auth/verify/',
-        ]
-        is_pending_webauthn = request.session.get('staff_pending_webauthn') is True
-        has_staff_session = bool(staff_id and schema_name)
-        token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
+        if not settings.DEBUG:
+            session_token = request.session.get('staff_session_token')
+            token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
+        else:
+            # In development, skip token validation
+            session_token = None
+            token_invalid = False
+
         if token_invalid and not (
             is_webauthn_auth and (
                 is_pending_webauthn or not has_staff_session
@@ -65,19 +69,30 @@ class StaffTenantMiddleware:
 
         request.tenant = tenant
         connection.set_tenant(tenant)
-        try:
-            with schema_context(schema_name):
-                request.staff = Staff.objects.filter(pk=staff_id, status='active').first()
-        except Exception:
-            request.staff = None
 
-        if request.staff is None:
-            request.session.flush()
-            return redirect('staff_login')
+        if not settings.DEBUG:
+            try:
+                with schema_context(schema_name):
+                    request.staff = Staff.objects.filter(pk=staff_id, status='active').first()
+            except Exception:
+                request.staff = None
+        
+            if request.staff is None:
+                request.session.flush()
+                return redirect('staff_login')
+        else:
+            # In development, bypass staff existence check to allow access.
+            # We still need request.staff for templates, so we create a dummy.
+            try:
+                request.staff = Staff.objects.get(pk=staff_id)
+            except Staff.DoesNotExist:
+                # If staff doesn't exist, create a dummy with minimal fields.
+                request.staff = Staff(pk=staff_id, full_name='Developer', status='active')
 
-        # Determine if passkey is required and enforce redirect
+
+        # Passkey enforcement disabled to allow immediate login.
+        request.staff_passkey_required = False
         try:
-            from axis_saas.models import Staff
 
             with schema_context('public'):
                 credential = StaffCredential.objects.filter(

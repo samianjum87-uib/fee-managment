@@ -1,123 +1,99 @@
 #!/usr/bin/env python3
 """
-axis_patcher.py - Add missing 'from django.shortcuts import redirect' to middleware
+axis_patcher.py - Remove redundant inner import of Staff in staff_tenant_middleware.py
 
-This script corrects the NameError caused by missing redirect import.
+This script removes the line `from axis_saas.models import Staff` from inside the
+try block in StaffTenantMiddleware.__call__ to fix an UnboundLocalError.
 
 Usage:
-    python axis_patcher.py [--dry-run] [--verbose] [--target-dir PATH]
-
-Options:
-    --dry-run      Show what would be changed without writing.
-    --verbose      Print detailed output.
-    --target-dir   Path to the project root (default: current directory).
+    python3 axis_patcher.py [--dry-run] [--verbose] [--target-dir PATH]
 """
 
-import os
+import argparse
+import datetime
 import re
 import sys
 from pathlib import Path
-from datetime import datetime
 
-# ----------------------------------------------------------------------
-# Configuration
-# ----------------------------------------------------------------------
-TARGET_FILE = "axis_saas/middleware/staff_tenant_middleware.py"
-IMPORT_LINE = "from django.shortcuts import redirect"
 
-# ----------------------------------------------------------------------
-# Logging
-# ----------------------------------------------------------------------
-def log(msg, verbose=False, force=False):
-    if verbose or force:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{timestamp}] {msg}")
+def log(message, verbose=False):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if verbose:
+        print(f"[{timestamp}] {message}")
+    else:
+        print(message)
 
-# ----------------------------------------------------------------------
-# Patcher logic
-# ----------------------------------------------------------------------
-def patch_file(file_path, dry_run=False, verbose=False):
-    """Add missing import to the target file."""
-    if not file_path.exists():
-        log(f"ERROR: File not found: {file_path}", force=True)
-        return False
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    original_content = content
-    lines = content.splitlines(keepends=True)
-
-    # Check if the import is already present (top-level, not indented)
-    import_exists = False
-    for line in lines:
-        if line.lstrip().startswith(IMPORT_LINE) and not line.startswith(' '):
-            import_exists = True
-            break
-
-    if import_exists:
-        log("Import already present. No changes needed.", verbose)
-        return True
-
-    # Find the last top-level import line
-    last_import_idx = -1
-    for i, line in enumerate(lines):
-        stripped = line.lstrip()
-        if stripped.startswith(('import ', 'from ')) and not line.startswith(' '):
-            last_import_idx = i
-
-    insert_idx = last_import_idx + 1 if last_import_idx != -1 else 0
-    lines.insert(insert_idx, IMPORT_LINE + '\n')
-    log(f"Inserted '{IMPORT_LINE}' at line {insert_idx+1}.", verbose)
-
-    new_content = ''.join(lines)
-
-    if dry_run:
-        log("--- DRY RUN: changes would be applied ---", force=True)
-        import difflib
-        diff = difflib.unified_diff(
-            original_content.splitlines(keepends=True),
-            new_content.splitlines(keepends=True),
-            fromfile=str(file_path),
-            tofile=str(file_path) + " (patched)"
-        )
-        for line in diff:
-            sys.stdout.write(line)
-        return True
-
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(new_content)
-    log(f"Successfully patched {file_path}", force=True)
-    return True
-
-# ----------------------------------------------------------------------
-# Main entry point
-# ----------------------------------------------------------------------
 def main():
-    import argparse
     parser = argparse.ArgumentParser(
-        description="Fix missing redirect import in middleware."
+        description="Remove redundant inner import of Staff in staff_tenant_middleware.py"
     )
-    parser.add_argument('--dry-run', action='store_true',
-                        help="Preview changes without writing.")
-    parser.add_argument('--verbose', action='store_true',
-                        help="Show detailed output.")
-    parser.add_argument('--target-dir', default='.',
-                        help="Project root directory (default: current).")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview changes without applying them."
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed output."
+    )
+    parser.add_argument(
+        "--target-dir",
+        default=".",
+        help="Project root directory (default: current directory)."
+    )
     args = parser.parse_args()
 
     target_dir = Path(args.target_dir).resolve()
-    if not target_dir.is_dir():
-        log(f"ERROR: Target directory not found: {target_dir}", force=True)
+    file_path = target_dir / "axis_saas" / "middleware" / "staff_tenant_middleware.py"
+    if not file_path.is_file():
+        log(f"ERROR: File not found: {file_path}", args.verbose)
         sys.exit(1)
 
-    file_path = target_dir / TARGET_FILE
-    if not file_path.exists():
-        log(f"ERROR: {TARGET_FILE} not found in {target_dir}", force=True)
-        sys.exit(1)
+    log(f"Target file: {file_path}", args.verbose)
 
-    success = patch_file(file_path, dry_run=args.dry_run, verbose=args.verbose)
-    sys.exit(0 if success else 1)
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
 
-if __name__ == '__main__':
+    # Pattern to match the line "from axis_saas.models import Staff" inside the try block.
+    # We'll look for the line that has that import, possibly with leading whitespace.
+    # We want to delete the line entirely.
+    # The line is inside a try block that starts with "try:" and contains that import.
+    # We'll match the line with its indentation and newline.
+    pattern = re.compile(
+        r"^[ \t]+from axis_saas\.models import Staff\s*$",
+        re.MULTILINE
+    )
+
+    # Check if the line exists.
+    if not pattern.search(content):
+        log("The inner import line was not found. No changes needed.", args.verbose)
+        return
+
+    # Remove all occurrences (should be one) of that line.
+    new_content = pattern.sub("", content)
+
+    # Also, ensure there is no blank line left from the removal. We can strip extra blank lines,
+    # but that's optional. We'll just replace.
+
+    if args.dry_run:
+        log("--- DRY RUN: Preview of changes ---", args.verbose)
+        import difflib
+        diff = difflib.unified_diff(
+            content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=str(file_path),
+            tofile=str(file_path) + " (fixed)"
+        )
+        for line in diff:
+            print(line, end="")
+        log("--- END DRY RUN ---", args.verbose)
+    else:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        log(f"File updated: {file_path}", args.verbose)
+
+
+if __name__ == "__main__":
     main()

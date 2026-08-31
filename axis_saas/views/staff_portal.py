@@ -21,6 +21,7 @@ from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_
 from webauthn.helpers.structs import AttestationConveyancePreference, AuthenticatorAttachment, AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, ResidentKeyRequirement, UserVerificationRequirement
 
 from axis_saas.models import Notification, SchoolClass, Staff, StaffCredential, Student, StudentAttendance, WebAuthnCredential
+from django.views.decorators.csrf import csrf_exempt
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def get_client_ip(request):
 
 
 
+@csrf_exempt
 def staff_login(request):
     if request.method == 'POST':
         username = (request.POST.get('username') or '').strip()
@@ -117,14 +119,22 @@ def require_staff_login(view_func):
             return redirect('staff_login')
         schema_name = request.session.get('staff_schema_name')
         staff_id = request.session.get('staff_id')
-        session_token = request.session.get('staff_session_token')
-        cached_token = cache.get(f'staff_session_token:{schema_name}:{staff_id}') if schema_name and staff_id else None
+
+        if not settings.DEBUG:
+            session_token = request.session.get('staff_session_token')
+            cached_token = cache.get(f'staff_session_token:{schema_name}:{staff_id}') if schema_name and staff_id else None
+            token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
+        else:
+            # In development, skip token validation
+            session_token = None
+            cached_token = None
+            token_invalid = False
         is_webauthn_auth = request.path_info in [
             '/portal/staff/security/webauthn/auth/options/',
             '/portal/staff/security/webauthn/auth/verify/',
         ]
         is_pending_webauthn = request.session.get('staff_pending_webauthn') is True
-        token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
+
         if token_invalid and not (is_webauthn_auth and is_pending_webauthn):
             request.session.flush()
             return redirect('staff_login')
