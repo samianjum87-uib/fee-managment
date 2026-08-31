@@ -10,6 +10,7 @@ class StaffTenantMiddleware:
         self.get_response = get_response
 
     
+    
     def __call__(self, request):
         if not request.path_info.startswith('/portal/staff/'):
             return self.get_response(request)

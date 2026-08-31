@@ -32,6 +32,7 @@ def get_client_ip(request):
     return request.META.get('REMOTE_ADDR', 'unknown')
 
 
+
 def staff_login(request):
     if request.method == 'POST':
         username = (request.POST.get('username') or '').strip()
@@ -69,13 +70,8 @@ def staff_login(request):
                 request.session['staff_username'] = credential.username
                 request.session['staff_role'] = staff.role
                 request.session['staff_name'] = staff.full_name
-                request.session.set_expiry(1800)
-                request.session.modified = True
-
                 request.session['staff_session_token'] = uuid.uuid4().hex
-
                 request.session.set_expiry(1800)
-
                 request.session.modified = True
 
                 session_keys = cache.get(f'staff_session_keys:{credential.schema_name}:{staff.pk}', [])
@@ -95,7 +91,6 @@ def staff_login(request):
         return render(request, 'mobile/staff/login.html', {'error': 'Invalid username or password.'})
 
     return render(request, 'mobile/staff/login.html')
-
 
 def staff_logout(request):
     staff_id = request.session.get('staff_id')
@@ -346,6 +341,9 @@ def staff_webauthn_registration_options(request):
 
 @require_staff_login
 @require_http_methods(['POST'])
+
+@require_staff_login
+@require_http_methods(['POST'])
 def staff_webauthn_registration_verify(request):
     logger.info(f"Registration verify called for staff {request.session.get('staff_id')}")
     schema_name = request.session.get('staff_schema_name')
@@ -390,7 +388,6 @@ def staff_webauthn_registration_verify(request):
                 },
             )
             if not created and obj.is_active is False:
-                # If it existed but was inactive, reactivate
                 obj.is_active = True
                 obj.save(update_fields=['is_active'])
         except Exception as e:
@@ -401,6 +398,7 @@ def staff_webauthn_registration_verify(request):
         logger.info('Registration success, returning success response')
         return JsonResponse({'success': True, 'message': 'Passkey registered successfully.'})
 
+@require_http_methods(['POST'])
 
 @require_http_methods(['POST'])
 def staff_webauthn_authentication_options(request):
@@ -443,6 +441,8 @@ def staff_webauthn_authentication_options(request):
         user_verification=UserVerificationRequirement.REQUIRED,
     )
     return JsonResponse(json.loads(options_to_json(options)))
+
+@require_http_methods(['POST'])
 
 @require_http_methods(['POST'])
 def staff_webauthn_authentication_verify(request):
@@ -522,7 +522,6 @@ def staff_webauthn_authentication_verify(request):
     request.session.pop('staff_webauthn_login_schema_name', None)
     logger.info('Authentication success, returning redirect')
     return JsonResponse({'success': True, 'message': 'Passkey verified successfully.', 'redirect': '/portal/staff/dashboard/'})
-
 
 @require_staff_login
 @require_http_methods(['POST'])
