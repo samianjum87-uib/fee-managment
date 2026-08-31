@@ -20,9 +20,13 @@ class StaffTenantMiddleware:
             connection.set_schema_to_public()
             return self.get_response(request)
 
+        is_webauthn_auth = request.path_info in [
+            '/portal/staff/security/webauthn/auth/options/',
+            '/portal/staff/security/webauthn/auth/verify/',
+        ]
         staff_id = request.session.get('staff_id')
         schema_name = request.session.get('staff_schema_name')
-        if not staff_id or not schema_name:
+        if (not staff_id or not schema_name) and not is_webauthn_auth:
             request.session.flush()
             return redirect('staff_login')
 

@@ -145,14 +145,9 @@ def require_staff_login(view_func):
             '/portal/staff/logout/',
         }
         if request.path_info not in onboarding_paths:
-            with schema_context('public'):
-                credential = StaffCredential.objects.filter(
-                    staff_id=staff_id,
-                    schema_name=schema_name,
-                ).first()
-            if credential is None or not credential.has_passkey:
-                messages.warning(request, 'Register a passkey from your profile before using the staff portal.')
-                return redirect('staff_profile_page')
+            # Passkeys are optional and should not block access to the staff portal.
+            # The login and WebAuthn flows handle passkey verification when a user has one.
+            pass
         return view_func(request, *args, **kwargs)
     return wrapped
 
@@ -400,6 +395,7 @@ def staff_webauthn_authentication_options(request):
     staff_id = request.session.get('staff_id')
     schema_name = request.session.get('staff_schema_name')
 
+    passkeys = []
     if username:
         with schema_context('public'):
             credential = StaffCredential.objects.filter(username=username, is_active=True).first()
@@ -411,9 +407,7 @@ def staff_webauthn_authentication_options(request):
         request.session['staff_webauthn_login_username'] = credential.username
         request.session['staff_webauthn_login_staff_id'] = credential.staff_id
         request.session['staff_webauthn_login_schema_name'] = credential.schema_name
-    else:
-        if not staff_id or not schema_name:
-            return JsonResponse({'error': 'Authentication required.'}, status=401)
+    elif staff_id and schema_name:
         with schema_context('public'):
             credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
             if credential is None:
@@ -424,6 +418,12 @@ def staff_webauthn_authentication_options(request):
         request.session['staff_webauthn_login_username'] = credential.username
         request.session['staff_webauthn_login_staff_id'] = credential.staff_id
         request.session['staff_webauthn_login_schema_name'] = credential.schema_name
+    else:
+        with schema_context('public'):
+            passkeys = list(WebAuthnCredential.objects.filter(is_active=True).select_related('staff_credential'))
+        request.session['staff_webauthn_login_username'] = ''
+        request.session['staff_webauthn_login_staff_id'] = ''
+        request.session['staff_webauthn_login_schema_name'] = ''
 
     challenge = secrets.token_bytes(32)
     request.session['staff_webauthn_auth_challenge'] = bytes_to_base64url(challenge)
