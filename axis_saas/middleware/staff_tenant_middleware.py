@@ -39,8 +39,13 @@ class StaffTenantMiddleware:
             '/portal/staff/security/webauthn/auth/verify/',
         ]
         is_pending_webauthn = request.session.get('staff_pending_webauthn') is True
+        has_staff_session = bool(staff_id and schema_name)
         token_invalid = not session_token or cached_token in ['logged_out'] or cached_token != session_token
-        if token_invalid and not (is_webauthn_auth and is_pending_webauthn and session_token is None):
+        if token_invalid and not (
+            is_webauthn_auth and (
+                is_pending_webauthn or not has_staff_session
+            )
+        ):
             request.session.flush()
             return redirect('staff_login')
 
