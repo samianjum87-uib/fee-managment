@@ -9,6 +9,7 @@ class StaffTenantMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
+    
     def __call__(self, request):
         if not request.path_info.startswith('/portal/staff/'):
             return self.get_response(request)
@@ -72,6 +73,7 @@ class StaffTenantMiddleware:
             request.session.flush()
             return redirect('staff_login')
 
+        # Determine if passkey is required and enforce redirect
         try:
             from axis_saas.models import StaffCredential
             with schema_context('public'):
@@ -80,6 +82,21 @@ class StaffTenantMiddleware:
                     schema_name=schema_name,
                 ).first()
             request.staff_passkey_required = credential is None or not credential.has_passkey
+
+            # Enforce passkey registration if required and not on allowed paths
+            if request.staff_passkey_required:
+                allowed_paths = [
+                    '/portal/staff/profile/',
+                    '/portal/staff/security/webauthn/register/options/',
+                    '/portal/staff/security/webauthn/register/verify/',
+                    '/portal/staff/security/webauthn/auth/options/',
+                    '/portal/staff/security/webauthn/auth/verify/',
+                    '/portal/staff/logout/',
+                    '/portal/staff/login/',
+                ]
+                if request.path_info not in allowed_paths:
+                    from django.shortcuts import redirect
+                    return redirect('staff_profile_page')
         except Exception:
             request.staff_passkey_required = False
 

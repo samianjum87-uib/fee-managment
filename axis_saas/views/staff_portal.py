@@ -73,7 +73,9 @@ def staff_login(request):
                 request.session.modified = True
 
                 request.session['staff_session_token'] = uuid.uuid4().hex
+
                 request.session.set_expiry(1800)
+
                 request.session.modified = True
 
                 session_keys = cache.get(f'staff_session_keys:{credential.schema_name}:{staff.pk}', [])
@@ -271,6 +273,7 @@ def staff_profile(request):
         'credential': credential,
         'passkeys': passkeys,
         'has_passkey': bool(passkeys),
+        'staff_passkey_required': request.staff_passkey_required,
     })
 
 
@@ -340,6 +343,7 @@ def staff_webauthn_registration_options(request):
         return JsonResponse(json.loads(options_to_json(registration_options)))
 
 
+
 @require_staff_login
 @require_http_methods(['POST'])
 def staff_webauthn_registration_verify(request):
@@ -359,24 +363,40 @@ def staff_webauthn_registration_verify(request):
         credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
         if credential is None:
             return JsonResponse({'success': False, 'message': 'Credential not found.'}, status=404)
-        verification = verify_registration_response(
-            credential=payload,
-            expected_challenge=base64url_to_bytes(expected_challenge),
-            expected_rp_id=_staff_compute_rp_id(request),
-            expected_origin=_staff_expected_origins(request),
-            require_user_verification=True,
-        )
+
+        try:
+            verification = verify_registration_response(
+                credential=payload,
+                expected_challenge=base64url_to_bytes(expected_challenge),
+                expected_rp_id=_staff_compute_rp_id(request),
+                expected_origin=_staff_expected_origins(request),
+                require_user_verification=True,
+            )
+        except Exception as e:
+            logger.error(f"WebAuthn registration verification failed: {e}")
+            return JsonResponse({'success': False, 'message': f'Verification error: {str(e)}'}, status=400)
+
         logger.info(f"WebAuthn registration verification succeeded for credential_id={bytes_to_base64url(verification.credential_id)}")
-        WebAuthnCredential.objects.update_or_create(
-            credential_id=bytes_to_base64url(verification.credential_id),
-            defaults={
-                'staff_credential': credential,
-                'public_key': bytes_to_base64url(verification.credential_public_key),
-                'sign_count': verification.sign_count,
-                'device_name': payload.get('deviceName', 'Unknown Device'),
-                'is_active': True,
-            },
-        )
+
+        try:
+            obj, created = WebAuthnCredential.objects.update_or_create(
+                credential_id=bytes_to_base64url(verification.credential_id),
+                defaults={
+                    'staff_credential': credential,
+                    'public_key': bytes_to_base64url(verification.credential_public_key),
+                    'sign_count': verification.sign_count,
+                    'device_name': payload.get('deviceName', 'Unknown Device'),
+                    'is_active': True,
+                },
+            )
+            if not created and obj.is_active is False:
+                # If it existed but was inactive, reactivate
+                obj.is_active = True
+                obj.save(update_fields=['is_active'])
+        except Exception as e:
+            logger.error(f"Failed to save WebAuthn credential: {e}")
+            return JsonResponse({'success': False, 'message': f'Database error: {str(e)}'}, status=500)
+
         request.session.pop('staff_webauthn_registration_challenge', None)
         logger.info('Registration success, returning success response')
         return JsonResponse({'success': True, 'message': 'Passkey registered successfully.'})
@@ -391,38 +411,23 @@ def staff_webauthn_authentication_options(request):
         except json.JSONDecodeError:
             data = {}
     username = (data.get('username') or request.POST.get('username') or '').strip()
-    staff_id = request.session.get('staff_id')
-    schema_name = request.session.get('staff_schema_name')
 
-    passkeys = []
-    if username:
-        with schema_context('public'):
-            credential = StaffCredential.objects.filter(username=username, is_active=True).first()
-            if credential is None:
-                return JsonResponse({'error': 'Account not found.'}, status=404)
-            passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
+    # Require username for passkey login
+    if not username:
+        return JsonResponse({'error': 'Username is required for passkey login.'}, status=400)
+
+    with schema_context('public'):
+        credential = StaffCredential.objects.filter(username=username, is_active=True).first()
+        if credential is None:
+            return JsonResponse({'error': 'Account not found.'}, status=404)
+        passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
         if not passkeys:
             return JsonResponse({'error': 'No passkeys registered for this account.'}, status=403)
+
+        # Store login context in session
         request.session['staff_webauthn_login_username'] = credential.username
         request.session['staff_webauthn_login_staff_id'] = credential.staff_id
         request.session['staff_webauthn_login_schema_name'] = credential.schema_name
-    elif staff_id and schema_name:
-        with schema_context('public'):
-            credential = StaffCredential.objects.filter(staff_id=staff_id, schema_name=schema_name).first()
-            if credential is None:
-                return JsonResponse({'error': 'Credential not found.'}, status=404)
-            passkeys = list(WebAuthnCredential.objects.filter(staff_credential=credential, is_active=True))
-        if not passkeys:
-            return JsonResponse({'error': 'No passkeys registered for this account.'}, status=403)
-        request.session['staff_webauthn_login_username'] = credential.username
-        request.session['staff_webauthn_login_staff_id'] = credential.staff_id
-        request.session['staff_webauthn_login_schema_name'] = credential.schema_name
-    else:
-        with schema_context('public'):
-            passkeys = list(WebAuthnCredential.objects.filter(is_active=True).select_related('staff_credential'))
-        request.session['staff_webauthn_login_username'] = ''
-        request.session['staff_webauthn_login_staff_id'] = ''
-        request.session['staff_webauthn_login_schema_name'] = ''
 
     challenge = secrets.token_bytes(32)
     request.session['staff_webauthn_auth_challenge'] = bytes_to_base64url(challenge)
@@ -438,7 +443,6 @@ def staff_webauthn_authentication_options(request):
         user_verification=UserVerificationRequirement.REQUIRED,
     )
     return JsonResponse(json.loads(options_to_json(options)))
-
 
 @require_http_methods(['POST'])
 def staff_webauthn_authentication_verify(request):

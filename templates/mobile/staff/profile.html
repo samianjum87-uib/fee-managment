@@ -28,7 +28,7 @@
 {% endif %}
 <div class="card">
     <h3>Passkey Security</h3>
-    {% if not has_passkey %}<div class="alert security-alert">
+    {% if staff_passkey_required %}<div class="alert security-alert">
         <strong>Required before portal access</strong>
         <div>Register a native WebAuthn passkey using your device’s biometric or security-key support. This is the production-grade protection used for modern staff portals.</div>{% endif %}
     </div>

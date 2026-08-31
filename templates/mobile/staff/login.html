@@ -179,7 +179,14 @@
     }
 
     document.getElementById('passkey-login-btn')?.addEventListener('click', function () {
-        loginWithPasskey('');
+        const usernameInput = document.getElementById('username');
+        const username = usernameInput ? usernameInput.value.trim() : '';
+        if (!username) {
+            alert('Please enter your username before using passkey login.');
+            if (usernameInput) usernameInput.focus();
+            return;
+        }
+        loginWithPasskey(username);
     });
 
     async function completePendingPasskeyLogin() {
