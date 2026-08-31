@@ -80,7 +80,8 @@ class StaffTenantMiddleware:
             logger = logging.getLogger(__name__)
             logger.info(f"Middleware: staff_id={staff_id}, schema={schema_name}")
             logger.info(f"Credential exists: {credential is not None}, has_passkey: {credential.has_passkey if credential else False}")
-            from axis_saas.models import StaffCredential
+            from axis_saas.models import Staff
+from django.shortcuts import redirectCredential
             with schema_context('public'):
                 credential = StaffCredential.objects.filter(
                     staff_id=staff_id,
