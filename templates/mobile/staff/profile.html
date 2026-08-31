@@ -137,8 +137,15 @@
             });
 
             if (!response.ok) {
-                const error = await response.json().catch(() => ({ error: 'Unable to prepare passkey registration.' }));
-                throw new Error(error.error || 'Unable to prepare passkey registration.');
+                let serverMessage = 'Unable to prepare passkey registration.';
+                try {
+                    const errorPayload = await response.json();
+                    serverMessage = errorPayload.error || errorPayload.message || serverMessage;
+                } catch (error) {
+                    const text = await response.text().catch(() => '');
+                    if (text) serverMessage = text;
+                }
+                throw new Error(`Server rejected passkey registration (${response.status}): ${serverMessage}`);
             }
 
             const options = await response.json();
