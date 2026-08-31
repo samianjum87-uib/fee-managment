@@ -2,7 +2,7 @@ from django.db import connection
 
 from django_tenants.utils import get_tenant_model, schema_context
 
-from axis_saas.models import Staff
+from axis_saas.models import Staff, StaffCredential
 
 
 class StaffTenantMiddleware:
@@ -103,8 +103,6 @@ class StaffTenantMiddleware:
                 if request.path_info not in allowed_paths:
                     return redirect('staff_profile_page')
         except Exception as e:
-            import logging
-from django.shortcuts import redirect
             logger = logging.getLogger(__name__)
             logger.error(f"Middleware error: {e}")
             request.staff_passkey_required = False

@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 """
-axis_patcher.py - Fix indentation and import issues in staff_tenant_middleware.py
+axis_patcher.py - Fix IndentationError and missing imports in staff_tenant_middleware.py
 
 This script corrects:
-1. Missing 'from django.shortcuts import redirect' at the top.
-2. Removes incorrectly placed import inside the except block.
-3. Fixes indentation of the logger lines inside the except block.
+1. Missing 'from django.shortcuts import redirect' at top.
+2. Missing 'import logging' at top.
+3. Missing logger definition: logger = logging.getLogger(__name__)
+4. Removes the incorrectly placed import line inside the except block.
+5. Fixes indentation of the except block contents.
 
 Usage:
     python axis_patcher.py [--dry-run] [--verbose] [--target-dir PATH]
 
 Options:
     --dry-run      Show what would be changed without writing.
-    --verbose      Print detailed logs.
+    --verbose      Print detailed output.
     --target-dir   Path to the project root (default: current directory).
 """
 
 import os
 import re
 import sys
+import difflib
 from pathlib import Path
 from datetime import datetime
 
@@ -26,7 +29,14 @@ from datetime import datetime
 # Configuration
 # ----------------------------------------------------------------------
 TARGET_FILE = "axis_saas/middleware/staff_tenant_middleware.py"
-IMPORT_LINE = "from django.shortcuts import redirect"
+
+# Lines to ensure are present at top (in order)
+IMPORT_REDIRECT = "from django.shortcuts import redirect"
+IMPORT_LOGGING = "import logging"
+LOGGER_DEF = "logger = logging.getLogger(__name__)"
+
+# Pattern to match the broken import line inside except
+BROKEN_IMPORT_PATTERN = r'^[ \t]*from django\.shortcuts import redirect\s*$'
 
 # ----------------------------------------------------------------------
 # Logging
@@ -49,103 +59,98 @@ def patch_file(file_path, dry_run=False, verbose=False):
         content = f.read()
 
     original_content = content
-    modified = False
-
-    # 1. Ensure the correct import is at the top after existing imports.
     lines = content.splitlines(keepends=True)
 
-    # Check if import already exists.
-    import_exists = any(re.search(r'^from django\.shortcuts import redirect\s*$', line) for line in lines)
+    # Step 1: Insert necessary imports at top if missing.
+    # We'll find the index after the last existing import (top-level, not indented).
+    last_import_idx = -1
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith(('import ', 'from ')) and not line.startswith(' '):
+            last_import_idx = i
 
-    if not import_exists:
-        # Find the last import line (from or import) and insert after it.
-        insert_idx = -1
-        for i, line in enumerate(lines):
-            stripped = line.lstrip()
-            if stripped.startswith(('import ', 'from ')):
-                insert_idx = i
-        if insert_idx == -1:
-            insert_idx = 0
-        else:
-            insert_idx += 1
-        lines.insert(insert_idx, IMPORT_LINE + '\n')
-        log(f"Inserted '{IMPORT_LINE}' at top.", verbose)
-        modified = True
+    insert_idx = last_import_idx + 1 if last_import_idx != -1 else 0
 
-    # 2. Fix the except block: remove misplaced import and fix indentation.
-    # We'll scan for the except block and re-indent the lines inside.
-    # Specifically, we look for "except Exception as e:" then the following lines.
-    # We'll ensure the 'logger = ...' lines are indented by 8 spaces (two levels) relative to the except.
-    # The except line itself is indented by 4 spaces (within the try block).
-    # So inside the except, we want 8 spaces for the statements.
-    # Also remove any line that contains "from django.shortcuts import redirect" inside the block.
+    # List of lines to insert (in order)
+    to_insert = []
+    if not any(re.search(re.escape(IMPORT_REDIRECT), line) for line in lines):
+        to_insert.append(IMPORT_REDIRECT)
+    if not any(re.search(re.escape(IMPORT_LOGGING), line) for line in lines):
+        to_insert.append(IMPORT_LOGGING)
+    if not any(re.search(re.escape(LOGGER_DEF), line) for line in lines):
+        to_insert.append(LOGGER_DEF)
 
+    if to_insert:
+        for imp in reversed(to_insert):
+            lines.insert(insert_idx, imp + '\n')
+            log(f"Inserted line: {imp}", verbose)
+
+    # Step 2: Fix the except block.
+    # We'll rebuild lines, processing the except block to remove the broken import
+    # and fix indentation.
     new_lines = []
     i = 0
-    inside_except = False
-    except_indent = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.lstrip()
-        # Detect start of except block
+        # Detect the start of the except block (the one causing the error)
         if re.match(r'^except Exception as e:', stripped):
-            inside_except = True
-            # Determine the indentation of the except line
-            except_indent = len(line) - len(stripped)
             # Keep the except line as is
+            except_indent = len(line) - len(stripped)
             new_lines.append(line)
             i += 1
-            # Process the lines inside the block until we hit a line with indentation <= except_indent (or end)
+            # Now process lines inside the except block until we exit (indentation <= except_indent)
             while i < len(lines):
                 next_line = lines[i]
                 next_stripped = next_line.lstrip()
-                # Check if we are out of the block
                 if next_stripped == '':
-                    # Empty line - keep it, but we might be at the end of block? We'll keep it and continue.
+                    # Keep empty lines with correct indentation? We'll keep them as is, but they might be inside.
                     new_lines.append(next_line)
                     i += 1
                     continue
                 next_indent = len(next_line) - len(next_stripped)
-                # If the next line has indentation <= except_indent (and is not empty), we are out of block.
-                # However, we need to detect if it's another except/else/finally, or a return statement at the same level.
-                if next_indent <= except_indent and next_stripped and not next_stripped.startswith(('except', 'finally', 'else')):
-                    # We are out of the except block.
-                    inside_except = False
+                # If indentation <= except_indent and not empty, we're out of the block.
+                if next_indent <= except_indent and next_stripped:
                     break
-                # Inside the block: we need to fix indentation of the statements.
-                # The desired indentation is except_indent + 4 (standard 4 spaces per level).
-                target_indent = except_indent + 4
-                # If the line contains the broken import, skip it.
-                if re.search(r'^from django\.shortcuts import redirect', next_stripped):
-                    log(f"Removing broken import line: {next_line.strip()}", verbose)
-                    modified = True
+                # Inside block: if this line is the broken import, skip it.
+                if re.search(BROKEN_IMPORT_PATTERN, next_stripped):
+                    log(f"Removing broken import line inside except: {next_line.strip()}", verbose)
                     i += 1
                     continue
-                # Otherwise, fix indentation by replacing the leading whitespace with target_indent spaces.
-                # But we need to preserve the actual content.
-                new_line = ' ' * target_indent + next_stripped
+                # Re-indent to except_indent + 4 spaces
+                new_line = ' ' * (except_indent + 4) + next_stripped
                 if new_line != next_line:
-                    modified = True
                     log(f"Re-indented line: {next_line.strip()} -> {new_line.strip()}", verbose)
                 new_lines.append(new_line)
                 i += 1
-            # After processing the block, continue with the outer loop (i already at the next line after block)
+            # After block, continue with the rest (i already at the next line after block)
             continue
         else:
-            # Not inside except, just keep line
             new_lines.append(line)
             i += 1
 
-    # Join lines
-    new_content = ''.join(new_lines)
+    # Step 3: Any leftover broken import lines that might have been missed (top-level)?
+    # We already handled the except, but we can scan and remove any top-level broken imports as well.
+    # However, the correct import is already added, so we'll remove duplicates.
+    # We'll filter out lines that are exactly the broken import and not indented.
+    final_lines = []
+    for line in new_lines:
+        stripped = line.lstrip()
+        if re.search(BROKEN_IMPORT_PATTERN, stripped):
+            # If this line is not inside an except (i.e., top-level), remove it.
+            if not line.startswith(' '):
+                log(f"Removing top-level broken import: {line.strip()}", verbose)
+                continue
+        final_lines.append(line)
 
-    if new_content == original_content and not modified:
+    new_content = ''.join(final_lines)
+
+    if new_content == original_content:
         log("No changes needed.", verbose)
         return True
 
     if dry_run:
         log("--- DRY RUN: changes would be applied ---", force=True)
-        import difflib
         diff = difflib.unified_diff(
             original_content.splitlines(keepends=True),
             new_content.splitlines(keepends=True),
